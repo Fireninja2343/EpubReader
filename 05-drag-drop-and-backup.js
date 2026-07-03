@@ -80,7 +80,8 @@ function handleCardDrop(e) {
   transaction.oncomplete = () => {
     loadedBooksMemory = filteredLibrary; // keep UI in sync
     renderLibraryGrid();
-};
+  };
+}
 
 // =================================================================
 // BACKUP: EXPORT / IMPORT ENTIRE LIBRARY AS JSON
