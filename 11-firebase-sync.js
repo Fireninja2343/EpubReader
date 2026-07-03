@@ -108,14 +108,14 @@ async function pushBookMetadataToCloud(book) {
   if (!currentUser || !book || book.id == null) return;
   await booksCollection().doc(String(book.id)).set(
     {
-      title: book.title,
-      cover: book.cover || null,
-      sortOrder: book.sortOrder,
-      currentChapter: book.currentChapter,
-      scrollOffset: book.scrollOffset,
-      isRead: book.isRead,
-      dateImported: book.dateImported,
-      groupId: book.groupId,
+      title: book.title ?? null,
+      cover: book.cover ?? null,
+      sortOrder: book.sortOrder ?? null,
+      currentChapter: book.currentChapter ?? 0,
+      scrollOffset: book.scrollOffset ?? 0,
+      isRead: book.isRead ?? false,
+      dateImported: book.dateImported ?? null,
+      groupId: book.groupId ?? null,
       lastModified: book.lastModified || Date.now(),
     },
     { merge: true }
@@ -163,7 +163,14 @@ async function pushGroupToCloud(group) {
   if (!currentUser || !group || group.id == null) return;
   await groupsCollection()
     .doc(String(group.id))
-    .set({ ...group, lastModified: Date.now() }, { merge: true });
+    .set(
+      {
+        name: group.name ?? null,
+        backgroundColor: group.backgroundColor ?? null,
+        lastModified: Date.now(),
+      },
+      { merge: true }
+    );
 }
 
 async function deleteBookFromCloud(bookId) {
@@ -244,11 +251,16 @@ async function pullInitialSyncFromCloud() {
     }
   } catch (err) {
     console.error("Firebase sync error:", err);
-    alert(
-      "Cloud sync ran into a problem: " +
-        err.message +
-        "\n\nMost commonly this means your Firestore security rules aren't published yet, or the database hasn't been created."
-    );
+    let hint = "";
+    if (err.code === "permission-denied") {
+      hint =
+        "\n\nThis usually means your Firestore security rules aren't published yet.";
+    } else if (err.code === "resource-exhausted") {
+      hint = "\n\nToo many writes went out at once — try signing in again.";
+    } else if (err.code === "not-found" || err.code === "unavailable") {
+      hint = "\n\nCheck that the Firestore database has actually been created.";
+    }
+    alert("Cloud sync ran into a problem: " + err.message + hint);
   } finally {
     initialSyncInProgress = false;
     fetchLocalLibrary();
