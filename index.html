@@ -4,10 +4,16 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Custom Local EPUB Reader</title>
+    <title>EPUB Reader</title>
 
     <link rel="stylesheet" href="styles.css" />
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+
+    <!-- Firebase (compat build, matches the plain-script style of the rest of the app) -->
+    <!-- Only Auth + Firestore are needed — no Storage — so this stays on the free Spark plan -->
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 
     <script src="01-state.js" defer></script>
     <script src="02-db.js" defer></script>
@@ -19,6 +25,7 @@
     <script src="08-view-router.js" defer></script>
     <script src="09-stats-and-context-menu.js" defer></script>
     <script src="10-utils.js" defer></script>
+    <script src="11-firebase-sync.js" defer></script>
 </head>
 
 <body>
@@ -183,6 +190,10 @@
         </div>
     </div>
 
+    <div id="sign-in">
+            <button id="btn-sync-signin" onclick="signInWithGoogle()">🔄 Sign in to Sync</button>
+            <span id="sync-status">☁️ Not signed in</span>
+    </div>
     <footer>
         <div id="footer-left">
             <div>Chapters: <span id="chapter-index-display">0/0</span></div>

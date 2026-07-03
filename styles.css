@@ -850,3 +850,12 @@ footer {
     max-height: 350px;
     overflow-y: auto;
 }
+
+#sign-in {
+    width: 200px;
+    height: 100px;
+    position: fixed;
+    right: 20px;
+    bottom: 30px;
+    z-index: 1000;
+}

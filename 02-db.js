@@ -54,9 +54,17 @@ function saveBookToDatabase(title, coverData, binaryData) {
     isRead: false,
     dateImported: new Date().getTime(),
     groupId: activeGroupFilterId, // Binds structural item directly inside active working directories scopes
+    lastModified: new Date().getTime(), // Used by Firebase sync to resolve which device has the newer copy
   };
-  store.add(entry).onsuccess = () => {
+  store.add(entry).onsuccess = (e) => {
+    const newId = e.target.result;
     fetchLocalLibrary();
+    // Push the freshly imported book up to the cloud (no-op if not signed in)
+    if (typeof pushBookMetadataToCloud === "function") {
+      const savedBook = { ...entry, id: newId };
+      pushBookMetadataToCloud(savedBook);
+      pushBookFileToCloud(savedBook);
+    }
   };
 }
 
@@ -69,7 +77,12 @@ function updateBookProgressInDB(bookId, spinePointer, scrollPosition) {
     if (record) {
       record.currentChapter = spinePointer;
       record.scrollOffset = scrollPosition;
+      record.lastModified = new Date().getTime();
       store.put(record);
+      // Mirror the reading-progress change to the cloud (no-op if not signed in)
+      if (typeof pushBookMetadataToCloud === "function") {
+        pushBookMetadataToCloud(record);
+      }
     }
   };
 }

@@ -14,9 +14,15 @@ function promptCreateGroup() {
 
   const transaction = db.transaction([STORE_GROUPS], "readwrite");
   const store = transaction.objectStore(STORE_GROUPS);
-  store.add({ name: name, backgroundColor: color });
+  let newGroupId = null;
+  store.add({ name: name, backgroundColor: color }).onsuccess = (e) => {
+    newGroupId = e.target.result;
+  };
   transaction.oncomplete = () => {
     fetchLocalLibrary();
+    if (typeof pushGroupToCloud === "function") {
+      pushGroupToCloud({ id: newGroupId, name: name, backgroundColor: color });
+    }
   };
 }
 
@@ -42,6 +48,9 @@ function promptEditGroup(groupId, currentName, currentColor) {
   };
   transaction.oncomplete = () => {
     fetchLocalLibrary();
+    if (typeof pushGroupToCloud === "function") {
+      pushGroupToCloud({ id: groupId, name: name, backgroundColor: color });
+    }
   };
 }
 
@@ -59,17 +68,24 @@ function deleteGroup(groupId) {
 
   groupsStore.delete(groupId);
 
+  let unassignedBooks = [];
   booksStore.getAll().onsuccess = (e) => {
     const records = e.target.result;
     records.forEach((book) => {
       if (book.groupId === groupId) {
         book.groupId = null;
+        book.lastModified = new Date().getTime();
         booksStore.put(book);
+        unassignedBooks.push(book);
       }
     });
   };
   transaction.oncomplete = () => {
     fetchLocalLibrary();
+    if (typeof deleteGroupFromCloud === "function") {
+      deleteGroupFromCloud(groupId);
+      unassignedBooks.forEach((book) => pushBookMetadataToCloud(book));
+    }
   };
 }
 
@@ -97,15 +113,21 @@ function moveSelectedBooksToGroup(groupId) {
   const transaction = db.transaction([STORE_BOOKS], "readwrite");
   const store = transaction.objectStore(STORE_BOOKS);
 
+  const movedBooks = [];
   selectedBookIds.forEach((bookId) => {
     const book = loadedBooksMemory.find((b) => b.id === bookId);
     if (book) {
       book.groupId = groupId;
+      book.lastModified = new Date().getTime();
       store.put(book);
+      movedBooks.push(book);
     }
   });
   transaction.oncomplete = () => {
     fetchLocalLibrary();
+    if (typeof pushBookMetadataToCloud === "function") {
+      movedBooks.forEach((book) => pushBookMetadataToCloud(book));
+    }
   };
 }
 
@@ -151,15 +173,24 @@ function submitGroupModalForm() {
         transaction.oncomplete = () => {
             closeGroupModal();
             fetchLocalLibrary();
+            if (typeof pushGroupToCloud === "function") {
+                pushGroupToCloud({ id: parseInt(idVal), name: nameVal, backgroundColor: colorVal });
+            }
         };
     } else {
         // EXECUTE INSERT CREATION PROCESS TRACES
         const transaction = db.transaction([STORE_GROUPS], "readwrite");
         const store = transaction.objectStore(STORE_GROUPS);
-        store.add({ name: nameVal, backgroundColor: colorVal });
+        let newGroupId = null;
+        store.add({ name: nameVal, backgroundColor: colorVal }).onsuccess = (e) => {
+            newGroupId = e.target.result;
+        };
         transaction.oncomplete = () => {
             closeGroupModal();
             fetchLocalLibrary();
+            if (typeof pushGroupToCloud === "function") {
+                pushGroupToCloud({ id: newGroupId, name: nameVal, backgroundColor: colorVal });
+            }
         };
     }
 }
