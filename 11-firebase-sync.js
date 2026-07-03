@@ -51,9 +51,6 @@ function signInWithGoogle() {
   const provider = new firebase.auth.GoogleAuthProvider();
 
   if (isMobileBrowser()) {
-    // Popups get killed almost immediately by mobile browsers (that's the
-    // "about:blank flashes and disappears" symptom) — redirect the whole
-    // page to Google instead, then pick the result back up below on load.
     fbAuth.signInWithRedirect(provider);
   } else {
     fbAuth.signInWithPopup(provider).catch((err) => {
