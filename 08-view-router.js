@@ -16,6 +16,7 @@ function showReaderState() {
     document.getElementById("btn-export-json").style.display = "none";
     document.getElementById("btn-import-json").style.display = "none";
     document.getElementById("btn-last-read").style.display = "none";
+    document.getElementById("sign-in").style.display = "none";
 
 
     // Safety check in case the back-to-groups button was visible
@@ -50,6 +51,7 @@ function showLibraryState() {
     document.getElementById("btn-export-json").style.display = "inline-block";
     document.getElementById("btn-import-json").style.display = "inline-block";
     document.getElementById("btn-last-read").style.display = "inline-block";
+    document.getElementById("sign-in").style.display = "inline-block";
 
     // Conditionally restore view mode toggle or group back button based on context
     const viewModeSelector = document.getElementById("library-view-mode");
