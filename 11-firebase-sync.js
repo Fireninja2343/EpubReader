@@ -7,7 +7,10 @@
 // can pull everything down and stay in sync.
 // =================================================================
 
-
+// --- FILL THIS IN with the config object from your Firebase project ---
+// (Project settings -> General -> "Your apps" -> Web app -> SDK setup and configuration)
+// NOTE: this module only uses Auth + Firestore — no Firebase Storage — so it works
+// entirely on the free "Spark" plan, no billing account required.
 const firebaseConfig = {
 apiKey: "AIzaSyB-lHa5mHi-iMdgGaTe5ehFZE1Xf2T8TkQ",
 authDomain: "epubreader-fire2343.firebaseapp.com",
@@ -40,12 +43,31 @@ let initialSyncInProgress = false;
 // -----------------------------------------------------------------
 // AUTH
 // -----------------------------------------------------------------
+function isMobileBrowser() {
+  return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+}
+
 function signInWithGoogle() {
   const provider = new firebase.auth.GoogleAuthProvider();
-  fbAuth.signInWithPopup(provider).catch((err) => {
-    alert("Sign-in failed: " + err.message);
-  });
+
+  if (isMobileBrowser()) {
+    // Popups get killed almost immediately by mobile browsers (that's the
+    // "about:blank flashes and disappears" symptom) — redirect the whole
+    // page to Google instead, then pick the result back up below on load.
+    fbAuth.signInWithRedirect(provider);
+  } else {
+    fbAuth.signInWithPopup(provider).catch((err) => {
+      alert("Sign-in failed: " + err.message);
+    });
+  }
 }
+
+// Picks up the result after signInWithRedirect() bounces the page back from Google
+fbAuth.getRedirectResult().catch((err) => {
+  if (err && err.code !== "auth/no-auth-event") {
+    alert("Sign-in failed: " + err.message);
+  }
+});
 
 function signOutOfSync() {
   detachRemoteListeners();
@@ -179,6 +201,9 @@ async function pullInitialSyncFromCloud() {
       groupsCollection().get(),
     ]);
 
+    const remoteBookIds = new Set(remoteBooksSnap.docs.map((d) => Number(d.id)));
+    const remoteGroupIds = new Set(remoteGroupsSnap.docs.map((d) => Number(d.id)));
+
     // Groups are small, just upsert them directly
     await new Promise((resolve) => {
       const tx = db.transaction([STORE_GROUPS], "readwrite");
@@ -188,6 +213,14 @@ async function pullInitialSyncFromCloud() {
       });
       tx.oncomplete = resolve;
     });
+
+    // Any group that only exists on THIS device (e.g. this is the very first
+    // sign-in and the cloud is still empty) needs to be pushed up
+    for (const group of loadedGroupsMemory) {
+      if (!remoteGroupIds.has(group.id)) {
+        await pushGroupToCloud(group);
+      }
+    }
 
     for (const docSnap of remoteBooksSnap.docs) {
       const remote = docSnap.data();
@@ -202,9 +235,25 @@ async function pullInitialSyncFromCloud() {
         await applyRemoteBookUpdate(bookId, remote);
       } else if ((localBook.lastModified || 0) > (remote.lastModified || 0)) {
         // This device has the newer copy — push it back up
-        pushBookMetadataToCloud(localBook);
+        await pushBookMetadataToCloud(localBook);
       }
     }
+
+    // Any book that only exists on THIS device and has never been pushed
+    // (first sign-in, or it was imported while offline) needs a full upload
+    for (const book of loadedBooksMemory) {
+      if (!remoteBookIds.has(book.id)) {
+        await pushBookMetadataToCloud(book);
+        await pushBookFileToCloud(book);
+      }
+    }
+  } catch (err) {
+    console.error("Firebase sync error:", err);
+    alert(
+      "Cloud sync ran into a problem: " +
+        err.message +
+        "\n\nMost commonly this means your Firestore security rules aren't published yet, or the database hasn't been created."
+    );
   } finally {
     initialSyncInProgress = false;
     fetchLocalLibrary();
