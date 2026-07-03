@@ -927,14 +927,14 @@ footer {
 @media (max-width: 1100px) {
     header {
         flex-wrap: wrap;
-        row-gap: 5px;
-        padding: 8px 8px;
+        row-gap: 3px;
+        padding: 5px 5px;
         justify-content: flex-start;
     }
 
     .nav-group {
         flex-wrap: wrap;
-        row-gap: 3px;
+        row-gap: 2px;
     }
 
     button, label.btn, select {
