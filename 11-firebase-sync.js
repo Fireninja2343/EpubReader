@@ -39,20 +39,15 @@ let initialSyncInProgress = false;
 // -----------------------------------------------------------------
 // AUTH
 // -----------------------------------------------------------------
-function isMobileBrowser() {
-  return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-}
+
 
 function signInWithGoogle() {
-  const provider = new firebase.auth.GoogleAuthProvider();
+    const provider = new firebase.auth.GoogleAuthProvider();
 
-  if (isMobileBrowser()) {
-    fbAuth.signInWithRedirect(provider);
-  } else {
     fbAuth.signInWithPopup(provider).catch((err) => {
-      alert("Sign-in failed: " + err.message);
+        alert("Sign-in failed: " + err.message);
     });
-  }
+
 }
 
 // Picks up the result after signInWithRedirect() bounces the page back from Google
