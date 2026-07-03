@@ -82,14 +82,14 @@ header {
 .nav-group {
     display: flex;
     align-items: center;
-    gap: 15px;
+    gap: 6px;
     white-space: nowrap;
 }
 
 /* Give the title a graceful truncation if it gets too long for small screens */
 #current-book-indicator {
     font-weight: 600;
-    max-width: 250px; /* Adjust based on preference */
+    max-width: 250px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -106,7 +106,7 @@ button, label.btn {
     background-color: var(--bg-card);
     color: var(--text-main);
     border: 1px solid var(--border);
-    padding: 6px 12px;
+    padding: 6px 6px;
     border-radius: 4px;
     cursor: pointer;
     font-size: 14px;
@@ -586,7 +586,7 @@ footer {
 }
 
 #scroll-bar {
-  width: 80px;
+  width: 100px;
   height: 12px;
   background: var(--bg-sidebar);
   margin-top: 8px;

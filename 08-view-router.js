@@ -13,6 +13,10 @@ function showReaderState() {
     document.getElementById("btn-create-group").style.display = "none";
     document.getElementById("library-view-mode").style.display = "none";
     document.getElementById("sort-selector").style.display = "none";
+    document.getElementById("btn-export-json").style.display = "none";
+    document.getElementById("btn-import-json").style.display = "none";
+    document.getElementById("btn-last-read").style.display = "none";
+
 
     // Safety check in case the back-to-groups button was visible
     const backGroupBtn = document.getElementById("btn-back-group");
@@ -43,6 +47,9 @@ function showLibraryState() {
     document.getElementById("upload-label").style.display = "inline-block";
     document.getElementById("btn-create-group").style.display = "inline-block";
     document.getElementById("sort-selector").style.display = "inline-block";
+    document.getElementById("btn-export-json").style.display = "inline-block";
+    document.getElementById("btn-import-json").style.display = "inline-block";
+    document.getElementById("btn-last-read").style.display = "inline-block";
 
     // Conditionally restore view mode toggle or group back button based on context
     const viewModeSelector = document.getElementById("library-view-mode");
