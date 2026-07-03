@@ -940,7 +940,7 @@ footer {
 
     button, label.btn, select {
         font-size: 11px;
-        padding: 6px 7px;
+        padding: 6px 6px;
     }
 
     #current-book-indicator {
