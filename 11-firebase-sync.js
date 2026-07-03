@@ -106,6 +106,7 @@ function groupsCollection() {
 // -----------------------------------------------------------------
 async function pushBookMetadataToCloud(book) {
   if (!currentUser || !book || book.id == null) return;
+  if(book.isRead === undefined) book.isRead = false; // Ensure isRead is always defined
   await booksCollection().doc(String(book.id)).set(
     {
       title: book.title ?? null,
@@ -316,7 +317,7 @@ async function downloadBookFromCloud(bookId, remoteMeta) {
         sortOrder: remoteMeta.sortOrder,
         currentChapter: remoteMeta.currentChapter,
         scrollOffset: remoteMeta.scrollOffset,
-        isRead: remoteMeta.isRead,
+        isRead: remoteMeta.isRead === undefined ? false : remoteMeta.isRead,
         dateImported: remoteMeta.dateImported,
         groupId: remoteMeta.groupId,
         lastModified: remoteMeta.lastModified,
