@@ -287,7 +287,12 @@ select {
     padding: 40px 20%;
     scroll-behavior: smooth;
 }
-
+#close-btn{
+    background-color: var(--accent);
+    z-index: 9999;
+    color: #000;
+    font-weight: bold;
+}
 /* Settings & Table of Contents Sidebar Panels */
 .reader-sidebar {
     width: 300px;

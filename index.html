@@ -129,6 +129,7 @@
         <div id="reader-view" class="view-panel">
             <div id="toc-sidebar" class="reader-sidebar">
                 <div class="sidebar-heading">Table of Contents</div>
+                <button id="close-btn" onclick="toggleSidebar('toc-sidebar')">X</button>
                 <div id="toc-render-list"></div>
             </div>
 
@@ -137,7 +138,7 @@
             </div>
 
             <div id="settings-sidebar" class="reader-sidebar">
-                
+                <button id="close-btn" onclick="toggleSidebar('settings-sidebar')">X</button>
                 <div class="sidebar-heading sidebar-heading-top">Library Interface</div>
                 <div class="control-item">
                     <label>Book Card Scale Dimension (<span id="lbl-card-size">160</span>px)</label>
