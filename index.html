@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Custom Local EPUB Reader</title>
+
+    <link rel="stylesheet" href="styles.css" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+
+    <script src="01-state.js" defer></script>
+    <script src="02-db.js" defer></script>
+    <script src="03-groups.js" defer></script>
+    <script src="04-library-view.js" defer></script>
+    <script src="05-drag-drop-and-backup.js" defer></script>
+    <script src="06-epub-reader.js" defer></script>
+    <script src="07-reader-controls.js" defer></script>
+    <script src="08-view-router.js" defer></script>
+    <script src="09-stats-and-context-menu.js" defer></script>
+    <script src="10-utils.js" defer></script>
+</head>
+
+<body>
+    <header>
+        <div class="nav-group">
+            <button id="btn-library" onclick="showLibraryState()">📚 Library</button>
+            <button id="btn-last-read" onclick="openLastReadBook()">⏳ Last Read</button>
+            <button id="btn-back-group" onclick="exitGroupView()">
+                ⬅️ Back to Groups
+            </button>
+            <label for="epub-uploader" class="btn" id="upload-label">➕ Import EPUB</label>
+            <input type="file" id="epub-uploader" accept=".epub"
+             multiple onchange="handleFileImport(event)">
+            <button id="btn-create-group" onclick="openGroupModal(false)">📁 New Group</button>
+            <button id="btn-export-json" onclick="exportLibraryToJSON()">📤 Export Backup</button>
+            <button id="btn-import-json" onclick="document.getElementById('backup-picker').click()">📥 Import Backup</button>
+            <input type="file" id="backup-picker" accept=".json" onchange="importLibraryFromJSON(event)">
+        </div>
+        
+        <div class="nav-group" id="reader-controls">
+            <button onclick="toggleSidebar('toc-sidebar')">📖 Contents</button>
+            <button onclick="toggleSidebar('settings-sidebar')">⚙️ Settings</button>
+            <button onclick="toggleScroll()">Toggle Scroll</button>
+           <div id="scroll-bar"><div id="fill"></div></div>
+        </div>
+            <button id="btn-global-stats" onclick="showStatsViewState()">📊 Stats</button>
+
+        <div class="nav-group">
+            <span id="current-book-indicator"></span>
+            <span id="current-group-indicator"></span>
+
+            <select id="library-view-mode" onchange="changeLibraryViewMode(this.value)">
+                <option value="grouped">View: Groups & Unassigned</option>
+                <option value="all">View: All Books (Flat List)</option>
+            </select>
+
+            <select id="sort-selector" onchange="sortLibrary()">
+                <option value="manual">Manual Order</option>
+                <option value="alpha">Alphabetical</option>
+                <option value="date">Date Imported</option>
+            </select>
+            <select id="theme-selector" onchange="changeActiveTheme(this.value)">
+                <option value="dark">Dark Theme</option>
+                <option value="oled">OLED Black</option>
+                <option value="sepia">Warm Sepia</option>
+            </select>
+        </div>
+    </header> 
+    <div id="stats-view" class="view-panel">
+        <div class="flex-between">
+            <h2>📊 Global Reading Analytics</h2>
+            <button onclick="showLibraryState()" class="btn-stats-back">
+                Back to Library
+            </button>
+        </div>
+        
+        <hr class="hr-divider" />
+
+        <div class="stats-grid">
+            <div class="stat-metric-card">
+                <div class="stat-label">TOTAL BOOKS IN LIBRARY</div>
+                <div id="stat-total-books" class="stat-value">0</div>
+            </div>
+            <div class="stat-metric-card">
+                <div class="stat-label">BOOKS FULLY READ</div>
+                <div id="stat-read-books" class="stat-value">0</div>
+            </div>
+            <div class="stat-metric-card">
+                <div class="stat-label">TOTAL TIME TRACKED</div>
+                <div id="stat-total-time" class="stat-value">0m</div>
+            </div>
+            <div class="stat-metric-card">
+                <div class="stat-label">AVERAGE TIME PER BOOK</div>
+                <div id="stat-avg-time" class="stat-value">0m</div>
+            </div>
+            <div class="stat-metric-card">
+                <div class="stat-label">TOTAL PAGES READ</div>
+                <div id="stat-global-pages" class="stat-value stat-value-neutral">0</div>
+            </div>
+        </div> <h3 class="section-heading">⏱️ Individual Breakdown Per Book</h3>
+        <div class="table-wrapper">
+            <table class="data-table">
+                <thead>
+                    <tr class="table-header-row">
+                        <th>Book Title</th>
+                        <th>Progress</th>
+                        <th>Time Spent</th>
+                        <th>Pages</th>
+                    </tr>
+                </thead>
+                <tbody id="stats-books-table-body"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <div id="app-container">
+        <div id="library-view" class="view-panel active">
+            <div class="library-grid" id="grid-container" ondragover="allowGridDrop(event)"></div>
+        </div>
+
+        <div id="reader-view" class="view-panel">
+            <div id="toc-sidebar" class="reader-sidebar">
+                <div class="sidebar-heading">Table of Contents</div>
+                <div id="toc-render-list"></div>
+            </div>
+
+            <div id="reader-container" onscroll="trackReadingProgress()">
+                <div id="text-render-frame"></div>
+            </div>
+
+            <div id="settings-sidebar" class="reader-sidebar">
+                
+                <div class="sidebar-heading sidebar-heading-top">Library Interface</div>
+                <div class="control-item">
+                    <label>Book Card Scale Dimension (<span id="lbl-card-size">160</span>px)</label>
+                    <input type="range" id="setting-card-size" min="100" max="260" value="160" oninput="applyLibraryInterfaceSettings()" />
+                </div>
+                <div class="sidebar-heading">Reader Configurations</div>
+                <div class="control-item control-item-top">
+                    <div class="flex-gap8">
+                        <input type="checkbox" id="setting-enable-color-override" onchange="handleColorOverrideToggle()">
+                        <label for="setting-enable-color-override">Override Default Text Color</label>
+                    </div>
+                    <div id="color-picker-wrapper">
+                        <input type="color" id="setting-font-color" value="#ffffff" onchange="saveAndApplyUserStyles()">
+                        <span class="hint-text">Custom character hex paint</span>
+                    </div>
+                </div>
+
+                <div class="control-item">
+                    <label>Font Style Profile</label>
+                    <select id="setting-font-family" onchange="saveAndApplyUserStyles()">
+                        <option value="system-ui">System Default</option>
+                        <option value="Georgia">Classic Serif</option>
+                        <option value="Courier New">Monospace</option>
+                        <option value="publisher">Publisher Default</option>
+                    </select>
+                </div>
+                <div class="control-item">
+                    <label>Text Scale (<span id="lbl-font-size">18</span>px)</label>
+                    <input type="range" id="setting-font-size" min="12" max="32" value="18" oninput="saveAndApplyUserStyles()">
+                </div>
+                <div class="control-item">
+                    <label>Line Height Scaling (<span id="lbl-line-spacing">1.6</span>)</label>
+                    <input type="range" id="setting-line-spacing" min="1.2" max="2.4" step="0.1" value="1.6"
+                     oninput="saveAndApplyUserStyles()">
+                </div>
+                <div class="control-item">
+                    <label>Paragraph Spacing (<span id="lbl-paragraph-spacing">1.5</span>em)</label>
+                    <input type="range" id="setting-paragraph-spacing" min="0.5" max="3.5" step="0.1" value="1.5"
+                     oninput="saveAndApplyUserStyles()">
+                </div>
+                <div class="control-item">
+                    <label>Page Margins Width (<span id="lbl-margins">15</span>%)</label>
+                    <input type="range" id="setting-margins" min="5" max="30" value="15" oninput="saveAndApplyUserStyles()">
+                </div>
+                <div class="control-item">
+                    <label>Scroll Speed (<span id="lbl-scroll-speed">5</span>)</label>
+                    <input type="range" id="setting-scroll-speed" min="1" max="10" value="5" oninput="saveAndApplyUserStyles()">
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <footer>
+        <div id="footer-left">
+            <div>Chapters: <span id="chapter-index-display">0/0</span></div>
+            <div class="footer-divider">|</div>
+            <div>Chapter Progress: <span id="chapter-percentage-display">0%</span></div>
+        </div>
+        
+        <div class="progress-bar-wrapper" id="progress-click-zone" onclick="handleProgressBarClick(event)">
+            <div class="progress-line" id="progress-line-track">
+                <div class="progress-fill" id="progress-indicator-bar"></div>
+                <div id="chapter-ticks-container"></div>
+            </div>
+        </div>
+        
+        <div id="footer-right">Book Progress: <span id="percentage-display">0%</span></div>
+    </footer>
+
+    <dialog id="group-config-modal" class="custom-modal">
+        <div class="modal-content">
+            <h3 id="modal-title-text">Create Group</h3>
+            <hr class="hr-divider-spaced" />
+            <input type="hidden" id="modal-group-id" />
+            <div class="control-item">
+                <label>Group Title Designation</label>
+                <input type="text" id="modal-group-name" placeholder="e.g., Progression Fantasy, Sci-Fi..." class="full-width-input" />
+            </div>
+            <div class="control-item control-item-top">
+                <label>Folder Background Canvas Color</label>
+                <div class="flex-gap10">
+                    <input type="color" id="modal-group-color" value="#252538" class="color-swatch-input" />
+                    <span class="hint-text">Select card shade palette</span>
+                </div>
+            </div>
+            <div class="modal-actions">
+                <button onclick="closeGroupModal()" class="btn-ghost">Cancel</button>
+                <button id="modal-submit-btn" onclick="submitGroupModalForm()" class="btn-accent">Save Directory</button>
+            </div>
+        </div>
+    </dialog>
+
+    <div id="book-context-menu">
+        <div class="context-item-row" onclick="triggerContextAction('metadata')">📋 View Metadata</div>
+        <div class="context-item-row" onclick="triggerContextAction('toggleRead')">✅ Toggle Read Status</div>
+        <div class="context-item-row" onclick="triggerContextAction('stats')">📊 Book Analytics</div>
+        <div class="context-item-row" onclick="triggerContextAction('group')">📁 Manage Group</div>
+        <hr class="hr-divider-tight">
+        <div class="context-item-row context-item-danger" onclick="triggerContextAction('delete')">🗑️ Delete Book</div>
+    </div>
+
+    <dialog id="book-metrics-modal" class="custom-modal">
+        <div class="modal-content">
+            <h3 id="metrics-modal-title">Book Diagnostics</h3>
+            <hr class="hr-divider-spaced">
+            <div id="metrics-modal-body"></div>
+            <div class="modal-actions">
+                <button onclick="document.getElementById('book-metrics-modal').close()" class="btn-accent btn-compact">Close</button>
+            </div>
+        </div>
+    </dialog>
+</body>
+</html>

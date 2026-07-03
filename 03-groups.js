@@ -1,0 +1,165 @@
+// =================================================================
+// STRUCTURAL LOCAL BUNDLE GROUPINGS ENGINES
+// =================================================================
+function promptCreateGroup() {
+  const name = prompt(
+    "Enter target unique name configuration for your new reading group:",
+  );
+  if (!name) return;
+  const color = prompt(
+    "Enter hex code or HTML style keyword configuration for directory background color:",
+    "#252538",
+  );
+  if (!color) return;
+
+  const transaction = db.transaction([STORE_GROUPS], "readwrite");
+  const store = transaction.objectStore(STORE_GROUPS);
+  store.add({ name: name, backgroundColor: color });
+  transaction.oncomplete = () => {
+    fetchLocalLibrary();
+  };
+}
+
+function promptEditGroup(groupId, currentName, currentColor) {
+  const name = prompt(
+    "Modify Group Directory Reference Name String:",
+    currentName,
+  );
+  if (!name) return;
+  const color = prompt(
+    "Modify Group Background Style Sheet Color Keyword Mapping:",
+    currentColor,
+  );
+  if (!color) return;
+
+  const transaction = db.transaction([STORE_GROUPS], "readwrite");
+  const store = transaction.objectStore(STORE_GROUPS);
+  store.get(groupId).onsuccess = (e) => {
+    const record = e.target.result;
+    record.name = name;
+    record.backgroundColor = color;
+    store.put(record);
+  };
+  transaction.oncomplete = () => {
+    fetchLocalLibrary();
+  };
+}
+
+function deleteGroup(groupId) {
+  if (
+    !confirm(
+      "Are you sure you want to delete this group? (Books inside will return to Global Library view)",
+    )
+  )
+    return;
+
+  const transaction = db.transaction([STORE_BOOKS, STORE_GROUPS], "readwrite");
+  const booksStore = transaction.objectStore(STORE_BOOKS);
+  const groupsStore = transaction.objectStore(STORE_GROUPS);
+
+  groupsStore.delete(groupId);
+
+  booksStore.getAll().onsuccess = (e) => {
+    const records = e.target.result;
+    records.forEach((book) => {
+      if (book.groupId === groupId) {
+        book.groupId = null;
+        booksStore.put(book);
+      }
+    });
+  };
+  transaction.oncomplete = () => {
+    fetchLocalLibrary();
+  };
+}
+
+function enterGroupView(groupId, groupName) {
+  activeGroupFilterId = groupId;
+  document.getElementById("current-group-indicator").innerText =
+    `📂 [Group: ${groupName}]`;
+  document.getElementById("current-group-indicator").style.display = "inline";
+  document.getElementById("btn-back-group").style.display = "inline-block";
+  document.getElementById("library-view-mode").style.display = "none"; // Hide view toggle while inside a folder
+  renderLibraryGrid();
+}
+
+function exitGroupView() {
+  activeGroupFilterId = null;
+  document.getElementById("current-group-indicator").style.display = "none";
+  document.getElementById("btn-back-group").style.display = "none";
+  document.getElementById("library-view-mode").style.display = "inline-block"; // Restore layout view selector controls
+  renderLibraryGrid();
+}
+
+// Move item matrices targets context directly via click drops
+function moveSelectedBooksToGroup(groupId) {
+  if (selectedBookIds.length === 0) return;
+  const transaction = db.transaction([STORE_BOOKS], "readwrite");
+  const store = transaction.objectStore(STORE_BOOKS);
+
+  selectedBookIds.forEach((bookId) => {
+    const book = loadedBooksMemory.find((b) => b.id === bookId);
+    if (book) {
+      book.groupId = groupId;
+      store.put(book);
+    }
+  });
+  transaction.oncomplete = () => {
+    fetchLocalLibrary();
+  };
+}
+
+// =================================================================
+// IN-APP NATIVE MODAL DIALOG INPUT MANAGEMENT FORMS
+// =================================================================
+function openGroupModal(isEditMode = false, groupId = null, name = '', color = '#252538') {
+    const modal = document.getElementById("group-config-modal");
+    document.getElementById("modal-title-text").innerText = isEditMode ? "Modify Group Settings" : "Create New Reading Group";
+    document.getElementById("modal-group-id").value = isEditMode ? groupId : "";
+    document.getElementById("modal-group-name").value = name;
+    document.getElementById("modal-group-color").value = color;
+
+    modal.showModal(); // Launches native backdrop tracking locks layouts safely
+}
+
+function closeGroupModal() {
+    document.getElementById("group-config-modal").close();
+}
+
+function submitGroupModalForm() {
+    const idVal = document.getElementById("modal-group-id").value;
+    const nameVal = document.getElementById("modal-group-name").value.trim();
+    const colorVal = document.getElementById("modal-group-color").value;
+
+    if (!nameVal) {
+        alert("Please enter a valid group title.");
+        return;
+    }
+
+    if (idVal) {
+        // EXECUTE RE-WRITE EDIT PROCESS TRACES
+        const transaction = db.transaction([STORE_GROUPS], "readwrite");
+        const store = transaction.objectStore(STORE_GROUPS);
+        store.get(parseInt(idVal)).onsuccess = (e) => {
+            const record = e.target.result;
+            if (record) {
+                record.name = nameVal;
+                record.backgroundColor = colorVal;
+                store.put(record);
+            }
+        };
+        transaction.oncomplete = () => {
+            closeGroupModal();
+            fetchLocalLibrary();
+        };
+    } else {
+        // EXECUTE INSERT CREATION PROCESS TRACES
+        const transaction = db.transaction([STORE_GROUPS], "readwrite");
+        const store = transaction.objectStore(STORE_GROUPS);
+        store.add({ name: nameVal, backgroundColor: colorVal });
+        transaction.oncomplete = () => {
+            closeGroupModal();
+            fetchLocalLibrary();
+        };
+    }
+}
