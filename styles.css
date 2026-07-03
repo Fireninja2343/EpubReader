@@ -995,17 +995,17 @@ footer {
     }
 
     footer {
-        padding: 0 12px;
+        padding: 0 6px;
         font-size: 11px;
         gap: 3px;
     }
 
     #footer-left {
-        gap: 8px;
+        gap: 5px;
     }
 
     .progress-bar-wrapper {
-        margin: 0 10px;
+        margin: 0 5px;
     }
 
     #sign-in {
