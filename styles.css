@@ -96,7 +96,7 @@ header {
 /* Give the title a graceful truncation if it gets too long for small screens */
 #current-book-indicator {
     font-weight: 600;
-    max-width: 250px;
+    max-width: 300px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -928,8 +928,9 @@ footer {
     header {
         flex-wrap: wrap;
         row-gap: 2px;
-        padding: 4px 4px;
+        padding: 3px 3px;
         justify-content: flex-start;
+        font-size: 12px;
     }
 
     .nav-group {
@@ -940,10 +941,11 @@ footer {
 
     button, label.btn, select {
         font-size: 11px;
-        padding: 6px 6px;
+        padding: 4px 4px;
     }
 
     #current-book-indicator {
+        font-size: 10px;
         max-width: 160px;
     }
 
