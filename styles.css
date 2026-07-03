@@ -927,19 +927,19 @@ footer {
 @media (max-width: 860px) {
     header {
         flex-wrap: wrap;
-        row-gap: 8px;
-        padding: 10px 12px;
+        row-gap: 6px;
+        padding: 8px 10px;
         justify-content: flex-start;
     }
 
     .nav-group {
         flex-wrap: wrap;
-        row-gap: 8px;
+        row-gap: 6px;
     }
 
     button, label.btn, select {
-        font-size: 13px;
-        padding: 9px 10px; /* Bigger touch target than the desktop 6px */
+        font-size: 12px;
+        padding: 8px 9px; /* Bigger touch target than the desktop 6px */
     }
 
     #current-book-indicator {
