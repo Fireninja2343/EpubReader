@@ -21,6 +21,20 @@ function convertBlobToBase64(blobItem) {
   });
 }
 
+function base64ToBlob(base64) {
+  const [header, data] = base64.split(",");
+  const mime = header.match(/:(.*?);/)[1];
+
+  const binary = atob(data);
+  const array = [];
+
+  for (let i = 0; i < binary.length; i++) {
+    array.push(binary.charCodeAt(i));
+  }
+
+  return new Blob([new Uint8Array(array)], { type: mime });
+}
+
 let enabled = false;
 
 const stepPx = 100;

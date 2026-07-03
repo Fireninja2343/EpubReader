@@ -57,7 +57,7 @@ function closeBookContextMenuFlyoutOnceOutside() {
 
 // Route target operations commands parsed through contextual components choices
 function triggerContextAction(actionKey) {
-    const targetBookObj = loadedBooksMemory[currentActiveContextBookIndexId];
+    const targetBookObj = loadedBooksMemory.find(b => b.id === currentActiveContextBookIndexId);
     if (!targetBookObj) return;
 
     if (actionKey === 'delete') {
@@ -218,6 +218,8 @@ async function showStatsViewState() {
             const opfFile = await zip.file(opfPath).async("string");
             const opfDoc = parser.parseFromString(opfFile, "text/xml");
 
+            const spineItemsCount = opfDoc.querySelectorAll("spine > itemref").length;
+
             const spineElements = opfDoc.querySelectorAll("spine > itemref");
             const manifestItems = {};
             opfDoc.querySelectorAll("manifest > item").forEach(item => {
@@ -246,27 +248,28 @@ async function showStatsViewState() {
 
                 bookWordCount += text ? text.split(/\s+/).length : 0;
             }
-        } catch (e) {
-            console.error("Error parsing word counts for stats: ", e);
-        }
+
 
         // Your formula mapping pages to words
         const totalPages = Math.round(bookWordCount / 300);
 
         // --- CALCULATE PROGRESS & HEURISTICS ---
-        let isRead = !!book.isRead; 
-        if (isRead) {
-            readBooksCount++;
-        }        
-        let pagesRead = 0;
-        let wordsRead = 0;
+        let isRead = !!book.isRead;
 
-        // Corrected standard completion heuristic check
-        if (book.currentChapter > 0 || book.scrollOffset > 100) {
-            // Proportional estimate tracking: 100% if flagged complete, 
-            // otherwise estimate 15% linear progress tracking values
-            pagesRead = isRead ? totalPages : Math.min(totalPages, Math.round(totalPages * 0.15));
-            wordsRead = isRead ? bookWordCount : Math.min(bookWordCount, Math.round(bookWordCount * 0.15));
+        let pagesRead;
+        let wordsRead;
+
+        if (isRead) {
+            pagesRead = totalPages;
+            wordsRead = bookWordCount;
+        } else if (book.currentChapter > 0 || book.scrollOffset > 100) {
+            const progress = book.currentChapter / Math.max(1, spineItemsCount);
+
+            pagesRead = Math.round(progress * totalPages);
+            wordsRead = Math.round(progress * bookWordCount);
+        } else {
+            pagesRead = 0;
+            wordsRead = 0;
         }
 
         globalTotalPagesRead += pagesRead;
@@ -283,6 +286,9 @@ async function showStatsViewState() {
                 <td style="padding:12px;">${mins} minutes</td>
             </tr>
         `);
+        } catch (e) {
+            console.error("Error parsing word counts for stats: ", e);
+        }
     }
 
     // Flush table rows inside dashboard

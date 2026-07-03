@@ -66,7 +66,7 @@ function handleCardDrop(e) {
 
   filteredLibrary.splice(adjustedTargetIdx, 0, ...itemsMoving);
 
-  loadedBooksMemory = filteredLibrary;
+  //loadedBooksMemory = filteredLibrary;
 
   const transaction = db.transaction([STORE_BOOKS], "readwrite");
   const store = transaction.objectStore(STORE_BOOKS);
@@ -84,33 +84,57 @@ function handleCardDrop(e) {
 // =================================================================
 // BACKUP: EXPORT / IMPORT ENTIRE LIBRARY AS JSON
 // =================================================================
-function exportLibraryToJSON() {
+// =================================================================
+// BACKUP: EXPORT (FIXED - preserves EPUB files)
+// =================================================================
+async function exportLibraryToJSON() {
   const transaction = db.transaction([STORE_BOOKS, STORE_GROUPS], "readonly");
   const booksStore = transaction.objectStore(STORE_BOOKS);
   const groupsStore = transaction.objectStore(STORE_GROUPS);
 
-  booksStore.getAll().onsuccess = (e1) => {
-    const books = e1.target.result;
-    groupsStore.getAll().onsuccess = (e2) => {
-      const groups = e2.target.result;
+  const books = await new Promise((res) => {
+    booksStore.getAll().onsuccess = (e) => res(e.target.result);
+  });
 
-      const backupPackage = {
-        exportDate: new Date().toISOString(),
-        books: books,
-        groups: groups,
+  const groups = await new Promise((res) => {
+    groupsStore.getAll().onsuccess = (e) => res(e.target.result);
+  });
+
+  // Convert files safely
+  const safeBooks = await Promise.all(
+    books.map(async (b) => {
+      let fileData = null;
+
+      if (b.fileData instanceof File || b.fileData instanceof Blob) {
+        fileData = await convertBlobToBase64(b.fileData);
+      } else {
+        fileData = b.fileData || null;
+      }
+
+      return {
+        ...b,
+        fileData
       };
+    })
+  );
 
-      const blob = new Blob([JSON.stringify(backupPackage, null, 2)], {
-        type: "application/json",
-      });
-      const url = URL.createObjectURL(blob);
-
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `EpubReader_Backup_${new Date().toISOString().slice(0, 10)}.json`;
-      a.click();
-    };
+  const backupPackage = {
+    exportDate: new Date().toISOString(),
+    books: safeBooks,
+    groups: groups,
   };
+
+  const blob = new Blob([JSON.stringify(backupPackage)], {
+    type: "application/json",
+  });
+
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `EpubReader_Backup_${new Date().toISOString().slice(0, 10)}.json`;
+  a.click();
+
+  URL.revokeObjectURL(url);
 }
 
 function importLibraryFromJSON(event) {
@@ -118,6 +142,7 @@ function importLibraryFromJSON(event) {
   if (!file) return;
 
   const reader = new FileReader();
+
   reader.onload = function (e) {
     try {
       const data = JSON.parse(e.target.result);
@@ -125,25 +150,38 @@ function importLibraryFromJSON(event) {
 
       const transaction = db.transaction(
         [STORE_BOOKS, STORE_GROUPS],
-        "readwrite",
+        "readwrite"
       );
+
       const booksStore = transaction.objectStore(STORE_BOOKS);
       const groupsStore = transaction.objectStore(STORE_GROUPS);
 
-      // Clear existing structures to avoid duplicate primary key collisions
       booksStore.clear();
       groupsStore.clear();
 
       data.groups.forEach((g) => groupsStore.put(g));
-      data.books.forEach((b) => booksStore.put(b));
+
+      data.books.forEach((b) => {
+        let fileData = null;
+
+        if (b.fileData && typeof b.fileData === "string") {
+          fileData = base64ToBlob(b.fileData);
+        }
+
+        booksStore.put({
+          ...b,
+          fileData
+        });
+      });
 
       transaction.oncomplete = () => {
-        alert("Library reconstituted perfectly!");
+        alert("Library restored successfully!");
         fetchLocalLibrary();
       };
     } catch (err) {
-      alert("Failed to parse backup file: Core layout parameters invalid.");
+      alert("Failed to parse backup file.");
     }
   };
+
   reader.readAsText(file);
 }
