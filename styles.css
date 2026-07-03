@@ -314,6 +314,9 @@ select {
     padding-bottom: 10px;
     border-bottom: 1px solid var(--border);
 }
+.ornamental-break-as-text{
+    display:none;
+}
 
 .control-item {
     margin-bottom: 15px;
