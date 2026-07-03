@@ -7,10 +7,6 @@
 // can pull everything down and stay in sync.
 // =================================================================
 
-// --- FILL THIS IN with the config object from your Firebase project ---
-// (Project settings -> General -> "Your apps" -> Web app -> SDK setup and configuration)
-// NOTE: this module only uses Auth + Firestore — no Firebase Storage — so it works
-// entirely on the free "Spark" plan, no billing account required.
 const firebaseConfig = {
 apiKey: "AIzaSyB-lHa5mHi-iMdgGaTe5ehFZE1Xf2T8TkQ",
 authDomain: "epubreader-fire2343.firebaseapp.com",
@@ -51,9 +47,6 @@ function signInWithGoogle() {
   const provider = new firebase.auth.GoogleAuthProvider();
 
   if (isMobileBrowser()) {
-    // Popups get killed almost immediately by mobile browsers (that's the
-    // "about:blank flashes and disappears" symptom) — redirect the whole
-    // page to Google instead, then pick the result back up below on load.
     fbAuth.signInWithRedirect(provider);
   } else {
     fbAuth.signInWithPopup(provider).catch((err) => {
