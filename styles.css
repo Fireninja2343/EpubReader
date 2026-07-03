@@ -927,7 +927,7 @@ footer {
 @media (max-width: 1080px) {
     header {
         flex-wrap: wrap;
-        row-gap: 4px;
+        row-gap: 5px;
         padding: 8px 8px;
         justify-content: flex-start;
     }
