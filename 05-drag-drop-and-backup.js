@@ -71,15 +71,16 @@ function handleCardDrop(e) {
   const transaction = db.transaction([STORE_BOOKS], "readwrite");
   const store = transaction.objectStore(STORE_BOOKS);
 
-  loadedBooksMemory.forEach((book, idx) => {
+  // IMPORTANT: use filteredLibrary (new order)
+  filteredLibrary.forEach((book, idx) => {
     book.sortOrder = idx;
     store.put(book);
   });
 
   transaction.oncomplete = () => {
+    loadedBooksMemory = filteredLibrary; // keep UI in sync
     renderLibraryGrid();
-  };
-}
+};
 
 // =================================================================
 // BACKUP: EXPORT / IMPORT ENTIRE LIBRARY AS JSON
