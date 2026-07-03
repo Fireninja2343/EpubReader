@@ -3,8 +3,8 @@
 
 <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>EPUB Reader</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>Custom Local EPUB Reader</title>
 
     <link rel="stylesheet" href="styles.css" />
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
@@ -189,11 +189,11 @@
             </div>
         </div>
     </div>
-
     <div id="sign-in">
             <button id="btn-sync-signin" onclick="signInWithGoogle()">🔄 Sign in to Sync</button>
             <span id="sync-status">☁️ Not signed in</span>
     </div>
+
     <footer>
         <div id="footer-left">
             <div>Chapters: <span id="chapter-index-display">0/0</span></div>
