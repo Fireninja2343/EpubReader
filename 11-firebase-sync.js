@@ -51,6 +51,9 @@ function signInWithGoogle() {
   const provider = new firebase.auth.GoogleAuthProvider();
 
   if (isMobileBrowser()) {
+    // Popups get killed almost immediately by mobile browsers (that's the
+    // "about:blank flashes and disappears" symptom) — redirect the whole
+    // page to Google instead, then pick the result back up below on load.
     fbAuth.signInWithRedirect(provider);
   } else {
     fbAuth.signInWithPopup(provider).catch((err) => {
@@ -144,19 +147,19 @@ async function pushBookFileToCloud(book) {
     .doc(String(book.id))
     .collection("fileChunks");
 
-  // Clean up leftover chunks if this version of the file is smaller than a previous upload
+  // Clean up leftover chunks if this version of the file is smaller than a previous upload.
+  // Writes are done ONE AT A TIME (not Promise.all) — firing dozens of chunk writes
+  // simultaneously is exactly what triggers Firestore's "write stream exhausted" error
+  // when syncing a whole library for the first time.
   const existing = await chunkCollection.get();
-  await Promise.all(
-    existing.docs
-      .filter((d) => Number(d.id) >= chunks.length)
-      .map((d) => d.ref.delete())
-  );
+  const staleDocs = existing.docs.filter((d) => Number(d.id) >= chunks.length);
+  for (const staleDoc of staleDocs) {
+    await staleDoc.ref.delete();
+  }
 
-  await Promise.all(
-    chunks.map((chunkStr, idx) =>
-      chunkCollection.doc(String(idx)).set({ data: chunkStr })
-    )
-  );
+  for (let idx = 0; idx < chunks.length; idx++) {
+    await chunkCollection.doc(String(idx)).set({ data: chunks[idx] });
+  }
 
   await booksCollection()
     .doc(String(book.id))
@@ -176,7 +179,9 @@ async function deleteBookFromCloud(bookId) {
     .doc(String(bookId))
     .collection("fileChunks");
   const existingChunks = await chunkCollection.get();
-  await Promise.all(existingChunks.docs.map((d) => d.ref.delete()));
+  for (const chunkDoc of existingChunks.docs) {
+    await chunkDoc.ref.delete().catch(() => {});
+  }
   await booksCollection().doc(String(bookId)).delete().catch(() => {});
 }
 
@@ -286,11 +291,10 @@ async function downloadBookFromCloud(bookId, remoteMeta) {
       .doc(String(bookId))
       .collection("fileChunks");
 
-    const chunkSnaps = await Promise.all(
-      Array.from({ length: remoteMeta.chunkCount }, (_, idx) =>
-        chunkCollection.doc(String(idx)).get()
-      )
-    );
+    const chunkSnaps = [];
+    for (let idx = 0; idx < remoteMeta.chunkCount; idx++) {
+      chunkSnaps.push(await chunkCollection.doc(String(idx)).get());
+    }
 
     if (chunkSnaps.some((snap) => !snap.exists)) return; // still mid-upload, retry later
 
