@@ -257,3 +257,34 @@ function toggleSidebar(id) {
 function changeActiveTheme(themeKey) {
   document.documentElement.setAttribute("data-theme", themeKey);
 }
+
+// =================================================================
+// END-OF-CHAPTER "NEXT CHAPTER" BANNER
+// Triggered by trackReadingProgress() once you scroll past 95% of a chapter.
+// =================================================================
+function injectChapterEndBanner() {
+  const frame = document.getElementById("text-render-frame");
+  if (!frame || document.getElementById("chapter-end-action-banner")) return;
+
+  const isLastChapter = activeSpinePointer >= activeSpineArray.length - 1;
+
+  const banner = document.createElement("div");
+  banner.id = "chapter-end-action-banner";
+  banner.className = "chapter-end-banner";
+
+  const label = document.createElement("span");
+  label.innerText = isLastChapter
+    ? "You've reached the end of the book."
+    : "End of chapter.";
+  banner.appendChild(label);
+
+  if (!isLastChapter) {
+    const nextBtn = document.createElement("button");
+    nextBtn.className = "btn-next-chapter-action";
+    nextBtn.innerText = "Next Chapter ⏭️";
+    nextBtn.onclick = () => stepToNextChapter();
+    banner.appendChild(nextBtn);
+  }
+
+  frame.appendChild(banner);
+}
