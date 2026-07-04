@@ -39,7 +39,7 @@ let enabled = false;
 
 const stepPx = 100;
 function getCooldownMs() {
-  return Number(document.getElementById("setting-scroll-speed").value) * 700;
+  return Number(document.getElementById("setting-scroll-speed").value) * 1000;
 }
 
 let lastScrollTime = 0;
