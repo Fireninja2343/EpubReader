@@ -137,7 +137,7 @@ function loadSavedUserInterfaceSettings() {
         if (config.lineSpacing) document.getElementById("setting-line-spacing").value = config.lineSpacing;
         if (config.margins) document.getElementById("setting-margins").value = config.margins;
         if (config.paragraphSpacing) document.getElementById("setting-paragraph-spacing").value = config.paragraphSpacing;
-        if (config.scrollSpeed) document.getElementById("setting-scroll-speed").value = config.scrollSpeed;
+        if (config.scrollSpeed) document.getElementById("setting-scroll-delay").value = config.scrollSpeed;
         
         // Handle explicit initialization properties for text overrides
         const overrideCheckbox = document.getElementById("setting-enable-color-override");
@@ -169,7 +169,7 @@ function saveAndApplyUserStyles() {
     const paragraphSpacing = document.getElementById("setting-paragraph-spacing").value;
     const colorOverrideEnabled = document.getElementById("setting-enable-color-override").checked;
     const color = document.getElementById("setting-font-color").value;
-    const scrollSpeed = document.getElementById("setting-scroll-speed").value;
+    const scrollSpeed = document.getElementById("setting-scroll-delay").value;
     const cardSize = document.getElementById("setting-card-size")?.value || "160";
 
     // 2. Package parameters bundle for LocalStorage tracking dumps
