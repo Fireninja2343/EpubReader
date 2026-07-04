@@ -48,7 +48,7 @@ const FALLBACK_STEP_PX = 100; // used if we can't measure any visible words at a
 // Roughly how many words should scroll past per tick at the default speed
 // setting. The speed slider still scales the delay between ticks (via
 // getCooldownMs), so this just sets "how much content is one tick's worth."
-const BASE_WORDS_PER_TICK = 35;
+const TARGET_WORDS_PER_TICK = 35;
 
 function getCooldownMs() {
   return Number(document.getElementById("setting-scroll-delay").value) * 1000;
