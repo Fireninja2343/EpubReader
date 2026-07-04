@@ -1021,6 +1021,7 @@ footer {
     }
 
     #stats-view {
+        margin-top: 24px;
         padding: 16px;
         height: calc(100dvh - 100px);
     }
