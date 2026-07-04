@@ -950,7 +950,7 @@ footer {
     }
 
     #library-view {
-        padding: 16px;
+        padding: 12px;
     }
 
     .library-grid {
@@ -1026,7 +1026,11 @@ footer {
     }
 
     .stat-value {
-        font-size: 22px;
+        font-size: 18px;
+    }
+
+    .group-card{
+        padding: 6px;
     }
 }
 
