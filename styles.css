@@ -124,6 +124,7 @@ button:hover, label.btn:hover {
     border-color: var(--accent);
 }
 
+
 select {
     background-color: var(--bg-card);
     color: var(--text-main);
@@ -736,6 +737,7 @@ footer {
     height: calc(100dvh - 120px);
     z-index: 200;
     min-height: 0;
+    margin-top: 30px;
 }
 
 .stats-grid {
@@ -1021,8 +1023,8 @@ footer {
     }
 
     #stats-view {
-        margin-top: 24px;
-        padding: 16px;
+        margin-top: 40px;
+        padding: 24px;
         height: calc(100dvh - 100px);
     }
 

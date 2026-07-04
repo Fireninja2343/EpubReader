@@ -188,7 +188,6 @@ async function showStatsViewState() {
 
     const statsPanel = document.getElementById("stats-view");
     statsPanel.style.display = "flex";
-    statsPanel.style.marginTop = "30px";
 
     let totalBooksCount = loadedBooksMemory.length;
     let readBooksCount = 0;
