@@ -29,7 +29,7 @@ fbDb.enablePersistence().catch(() => {
 // Firestore caps a single document at ~1MiB. EPUB files are stored as base64 text
 // split across several small documents in a "fileChunks" subcollection so we never
 // hit that ceiling. 700,000 characters keeps each chunk safely under the limit.
-const FILE_CHUNK_SIZE = 700000;
+const FILE_CHUNK_SIZE = Config.Sync.FILE_CHUNK_SIZE;
 
 let currentUser = null;
 let booksListenerUnsub = null;

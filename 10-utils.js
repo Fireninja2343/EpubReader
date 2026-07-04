@@ -36,19 +36,19 @@ function base64ToBlob(base64) {
 }
 
 let enabled = false;
-const AUTOSCROLL_DEBUG = true; // set to false to silence the console logging
+const AUTOSCROLL_DEBUG = Config.AutoScroller.AUTOSCROLL_DEBUG;
 
 // Scrolling now moves a variable distance each tick instead of a fixed 100px —
 // see computeAdaptiveStepPx() below. These are just safety bounds so a screen
 // that's all images (0 words) or one giant word doesn't jump too little/much.
-const MIN_STEP_PX = 20;
-const MAX_STEP_PX = 500;
-const FALLBACK_STEP_PX = 100; // used if we can't measure any visible words at all
+const MIN_STEP_PX = Config.AutoScroller.MIN_STEP_PX;
+const MAX_STEP_PX = Config.AutoScroller.MAX_STEP_PX;
+const FALLBACK_STEP_PX = Config.AutoScroller.FALLBACK_STEP_PX; // used if we can't measure any visible words at all
  
 // Roughly how many words should scroll past per tick at the default speed
 // setting. The speed slider still scales the delay between ticks (via
 // getCooldownMs), so this just sets "how much content is one tick's worth."
-const TARGET_WORDS_PER_TICK = 35;
+const TARGET_WORDS_PER_TICK = Config.AutoScroller.TARGET_WORDS_PER_TICK;
 
 function getCooldownMs() {
   return Number(document.getElementById("setting-scroll-delay").value) * 1000;

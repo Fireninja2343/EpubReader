@@ -2,9 +2,9 @@
 // GLOBAL STRUCTURAL ENGINE STATE MATRICES
 // =================================================================
 let db = null;
-const DB_NAME = "LocalEpubReaderDB_v2"; // Incremented schema mapping database version
-const STORE_BOOKS = "books";
-const STORE_GROUPS = "groups";
+const DB_NAME = Config.Db.DB_NAME; // Incremented schema mapping database version
+const STORE_BOOKS = Config.Db.STORE_BOOKS;
+const STORE_GROUPS = Config.Db.STORE_GROUPS;
 
 let focusedTimeTrackerHeartbeatInterval = null;
 let currentActiveContextBookIndexId = null; // Refers to the targeted row index selected by the 3 dots panel trigger
