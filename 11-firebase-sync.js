@@ -8,13 +8,13 @@
 // =================================================================
 
 const firebaseConfig = {
-apiKey: "AIzaSyB-lHa5mHi-iMdgGaTe5ehFZE1Xf2T8TkQ",
-authDomain: "epubreader-fire2343.firebaseapp.com",
-projectId: "epubreader-fire2343",
-storageBucket: "epubreader-fire2343.firebasestorage.app",
-messagingSenderId: "171569428425",
-appId: "1:171569428425:web:7e43e4deb49ab408cdda18",
-measurementId: "G-QB21V0K0KP"
+  apiKey: "AIzaSyB-lHa5mHi-iMdgGaTe5ehFZE1Xf2T8TkQ",
+  authDomain: "epubreader-fire2343.firebaseapp.com",
+  projectId: "epubreader-fire2343",
+  storageBucket: "epubreader-fire2343.firebasestorage.app",
+  messagingSenderId: "171569428425",
+  appId: "1:171569428425:web:7e43e4deb49ab408cdda18",
+  measurementId: "G-QB21V0K0KP",
 };
 
 firebase.initializeApp(firebaseConfig);
@@ -40,14 +40,12 @@ let initialSyncInProgress = false;
 // AUTH
 // -----------------------------------------------------------------
 
-
 function signInWithGoogle() {
-    const provider = new firebase.auth.GoogleAuthProvider();
+  const provider = new firebase.auth.GoogleAuthProvider();
 
-    fbAuth.signInWithPopup(provider).catch((err) => {
-        alert("Sign-in failed: " + err.message);
-    });
-
+  fbAuth.signInWithPopup(provider).catch((err) => {
+    alert("Sign-in failed: " + err.message);
+  });
 }
 
 // Picks up the result after signInWithRedirect() bounces the page back from Google
@@ -101,21 +99,23 @@ function groupsCollection() {
 // -----------------------------------------------------------------
 async function pushBookMetadataToCloud(book) {
   if (!currentUser || !book || book.id == null) return;
-  if(book.isRead === undefined) book.isRead = false; // Ensure isRead is always defined
-  await booksCollection().doc(String(book.id)).set(
-    {
-      title: book.title ?? null,
-      cover: book.cover ?? null,
-      sortOrder: book.sortOrder ?? null,
-      currentChapter: book.currentChapter ?? 0,
-      scrollOffset: book.scrollOffset ?? 0,
-      isRead: book.isRead ?? false,
-      dateImported: book.dateImported ?? null,
-      groupId: book.groupId ?? null,
-      lastModified: book.lastModified || Date.now(),
-    },
-    { merge: true }
-  );
+  if (book.isRead === undefined) book.isRead = false; // Ensure isRead is always defined
+  await booksCollection()
+    .doc(String(book.id))
+    .set(
+      {
+        title: book.title ?? null,
+        cover: book.cover ?? null,
+        sortOrder: book.sortOrder ?? null,
+        currentChapter: book.currentChapter ?? 0,
+        scrollOffset: book.scrollOffset ?? 0,
+        isRead: book.isRead ?? false,
+        dateImported: book.dateImported ?? null,
+        groupId: book.groupId ?? null,
+        lastModified: book.lastModified || Date.now(),
+      },
+      { merge: true },
+    );
 }
 
 async function pushBookFileToCloud(book) {
@@ -165,7 +165,7 @@ async function pushGroupToCloud(group) {
         backgroundColor: group.backgroundColor ?? null,
         lastModified: Date.now(),
       },
-      { merge: true }
+      { merge: true },
     );
 }
 
@@ -178,12 +178,18 @@ async function deleteBookFromCloud(bookId) {
   for (const chunkDoc of existingChunks.docs) {
     await chunkDoc.ref.delete().catch(() => {});
   }
-  await booksCollection().doc(String(bookId)).delete().catch(() => {});
+  await booksCollection()
+    .doc(String(bookId))
+    .delete()
+    .catch(() => {});
 }
 
 async function deleteGroupFromCloud(groupId) {
   if (!currentUser) return;
-  await groupsCollection().doc(String(groupId)).delete().catch(() => {});
+  await groupsCollection()
+    .doc(String(groupId))
+    .delete()
+    .catch(() => {});
 }
 
 // -----------------------------------------------------------------
@@ -199,8 +205,12 @@ async function pullInitialSyncFromCloud() {
       groupsCollection().get(),
     ]);
 
-    const remoteBookIds = new Set(remoteBooksSnap.docs.map((d) => Number(d.id)));
-    const remoteGroupIds = new Set(remoteGroupsSnap.docs.map((d) => Number(d.id)));
+    const remoteBookIds = new Set(
+      remoteBooksSnap.docs.map((d) => Number(d.id)),
+    );
+    const remoteGroupIds = new Set(
+      remoteGroupsSnap.docs.map((d) => Number(d.id)),
+    );
 
     // Groups are small, just upsert them directly
     await new Promise((resolve) => {
