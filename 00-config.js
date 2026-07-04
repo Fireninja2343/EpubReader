@@ -9,7 +9,7 @@ const Config = {
     MIN_STEP_PX: 20,
     MAX_STEP_PX: 500,
     FALLBACK_STEP_PX: 100,
-    TARGET_WORDS_PER_TICK: 35,
+    TARGET_WORDS_PER_TICK: 50,
   },
   Sync: {
     FILE_CHUNK_SIZE: 700000,
