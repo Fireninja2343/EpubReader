@@ -18,7 +18,6 @@ function showReaderState() {
     document.getElementById("btn-last-read").style.display = "none";
     document.getElementById("sign-in").style.display = "none";
     document.getElementById("current-group-indicator").style.display = "none"; 
-    document.getElementById("btn-global-stats").style.display = "none";
 
 
     // Safety check in case the back-to-groups button was visible
@@ -54,7 +53,7 @@ function showLibraryState() {
     document.getElementById("btn-import-json").style.display = "inline-block";
     document.getElementById("btn-last-read").style.display = "inline-block";
     document.getElementById("sign-in").style.display = "inline-block";
-    document.getElementById("btn-global-stats").style.display = "inline-block";
+  
 
     // Conditionally restore view mode toggle or group back button based on context
     const viewModeSelector = document.getElementById("library-view-mode");
@@ -68,6 +67,13 @@ function showLibraryState() {
     } else {
         if (viewModeSelector) viewModeSelector.style.display = "inline-block";
         if (backGroupBtn) backGroupBtn.style.display = "none";
+    }
+
+    // Send the final reading position to the cloud right away — the regular
+    // progress push is throttled to once per ~20s, so without this the last
+    // few seconds of a session could be lost to the cloud (still safe locally)
+    if (activeBookObject && typeof forcePushBookProgressToCloud === "function") {
+        forcePushBookProgressToCloud(activeBookObject.id);
     }
 
     activeBookObject = null;

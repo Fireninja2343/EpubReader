@@ -378,3 +378,25 @@ function detachRemoteListeners() {
   booksListenerUnsub = null;
   groupsListenerUnsub = null;
 }
+
+// -----------------------------------------------------------------
+// SAFETY NET: flush the last reading position on tab close/backgrounding.
+// Regular progress pushes are throttled (see 02-db.js), so without this,
+// backgrounding the app or closing the tab mid-chapter could leave the
+// cloud copy a bit stale (the local IndexedDB copy is always current).
+// -----------------------------------------------------------------
+document.addEventListener("visibilitychange", () => {
+  if (
+    document.visibilityState === "hidden" &&
+    activeBookObject &&
+    typeof forcePushBookProgressToCloud === "function"
+  ) {
+    forcePushBookProgressToCloud(activeBookObject.id);
+  }
+});
+
+window.addEventListener("pagehide", () => {
+  if (activeBookObject && typeof forcePushBookProgressToCloud === "function") {
+    forcePushBookProgressToCloud(activeBookObject.id);
+  }
+});
