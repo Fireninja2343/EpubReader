@@ -7,7 +7,7 @@
 // can pull everything down and stay in sync.
 // =================================================================
 
-const firebaseConfig = config.firebaseConfig;
+const firebaseConfig = Config.firebaseConfig;
 
 firebase.initializeApp(firebaseConfig);
 const fbAuth = firebase.auth();
