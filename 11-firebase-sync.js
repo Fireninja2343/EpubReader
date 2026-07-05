@@ -1,28 +1,29 @@
 /*
  =================================================================
  FIREBASE CLOUD SYNC MODULE
- IndexedDB stays the source of truth for offline use. This module
- mirrors book metadata / reading progress to Firestore, and the
+ IndexedDB remains the source of truth for offline use. This module
+ mirrors book metadata and reading progress to Firestore, and stores the
  actual .epub binaries as chunked base64 text also inside Firestore
- (no Firebase Storage / no billing plan needed).
+ (avoiding the need for Firebase Storage or a billing plan).
 
  SYNC MODEL (deliberately NOT real-time):
- - On sign-in (or every fresh page load while already signed in), we do
-   ONE catch-up pass: pull down anything new from the cloud, push up
-   anything that's only local.
- - While reading, progress pushes to the cloud AT MOST once per 20s per
-   book (see throttledCloudPush in 02-db.js), no matter how much you
-   scroll or how often the app calls updateBookProgressInDB.
+ - On sign-in (or on every fresh page load while already signed in), one
+   catch-up pass runs: anything new on the cloud is pulled down, and
+   anything that only exists locally is pushed up.
+ - While reading, progress is pushed to the cloud at most once every 20
+   seconds per book (see the throttle logic around lastCloudProgressPush),
+   no matter how much scrolling happens or how often progress updates are
+   requested.
  - Closing a book ("Back to Library") forces one final push so the last
-   few seconds of a session aren't lost to the throttle window — that is
-   the ONLY thing allowed to bypass the 20s throttle, and even it has its
-   own short minimum gap so it can't double-push.
- - There is deliberately NO live listener and NO push on tab-switch/
-   backgrounding anymore — both were sources of uncapped, un-throttled
-   Firestore reads/writes just from having the app open. That means
-   changes made on another device won't appear here until  reload or
-   re-sign-in — a real trade-off, made on purpose to keep this at zero
-   background cost.
+   few seconds of a session aren't lost to that 20s throttle window —
+   that forced push is the only thing allowed to bypass the throttle, and
+   it has its own short minimum gap so it can't double-push.
+ - There is deliberately no live listener and no push triggered by
+   tab-switching or backgrounding anymore — both were sources of
+   uncapped, un-throttled Firestore reads/writes just from having the app
+   open in a tab. As a result, changes made on another device won't show
+   up here until a reload or re-sign-in happens — a real trade-off, made
+   on purpose to keep background cost at zero.
  ================================================================= */
 
 const firebaseConfig = {
@@ -38,17 +39,20 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const fbAuth = firebase.auth();
 const fbDb = firebase.firestore();
-/*
- NOTE: Firestore's own offline-persistence cache (enablePersistence()) is
- intentionally NOT enabled. That cache keeps a local queue of un-sent
- writes across reloads, and if writes keep failing, that queue can grow
- and never fully drain — every reload then replays the pile-up and
- immediately floods the write stream again. The app's own IndexedDB is
- already the durable local store, so Firestore doesn't need a second one.
 
- Firestore caps a single document at ~1MiB. EPUB files are stored as base64 text
- split across several small documents in a "fileChunks" subcollection so we never
- hit that ceiling. 700,000 characters keeps each chunk safely under the limit.
+/*
+ Firestore's own offline-persistence cache (enablePersistence()) is
+ intentionally left disabled here. That cache keeps a local queue of
+ un-sent writes across reloads, and if writes keep failing for any reason,
+ that queue can grow without ever fully draining — every reload would then
+ replay the backlog and immediately flood the write stream again. Since
+ the app already has IndexedDB as its durable local store, Firestore
+ doesn't need a second offline cache layered on top.
+
+ Firestore also caps a single document at roughly 1MiB. EPUB files are
+ stored as base64 text split across several small documents in a
+ "fileChunks" subcollection so that cap is never hit. 700,000 characters
+ per chunk keeps each one safely under the limit.
 */
 const FILE_CHUNK_SIZE = Config.Sync.FILE_CHUNK_SIZE;
 
@@ -56,14 +60,15 @@ let currentUser = null;
 let booksListenerUnsub = null;
 let groupsListenerUnsub = null;
 let initialSyncInProgress = false;
+
 /*
- Guards against re-running the whole sync setup every time Firebase re-emits
- onAuthStateChanged for the SAME user (token refresh, mobile tab resume,
- reconnect, etc.) within one page load.
+ Guards against re-running the entire sync setup every time Firebase
+ re-emits onAuthStateChanged for the SAME user (which can happen on token
+ refresh, mobile tab resume, reconnect, etc.) within a single page load.
 */
 let syncedUid = null;
 
-// Simple visibility into how many Firestore writes we're actually issuing.
+// Tracks how many Firestore writes are actually being issued, for visibility while debugging.
 let cloudWriteCount = 0;
 function logCloudWrite(label) {
   cloudWriteCount++;
@@ -194,9 +199,12 @@ async function pushBookFileToCloud(book) {
     .set({ chunkCount: chunks.length }, { merge: true });
 }
 
-// Group pushes go through the SAME shared throttle as book progress
-// (defined in 02-db.js) — no more than one push per group per 20s, even
-// from rapid edits.
+/*
+ Group pushes go through the same shared throttle used elsewhere for book
+ reading-progress pushes, so rapid edits to a group (renaming it, changing
+ its color repeatedly, etc.) still result in no more than one Firestore
+ write per group every 20 seconds.
+*/
 async function pushGroupToCloud(group) {
   if (!currentUser || !group || group.id == null) return;
   throttledCloudPush(`group:${group.id}`, async () => {
@@ -372,15 +380,18 @@ async function downloadBookFromCloud(bookId, remoteMeta) {
   }
 }
 
-/* -----------------------------------------------------------------
+/*
+ -----------------------------------------------------------------
  LIVE LISTENERS — DEFINED BUT NOT USED
- Kept here in case of ever wanting a real-time cross-device sync back later, but
- they are not called anywhere right now. Real-time listeners mean every
- confirmed write triggers a matching read via your own listener, which is
- exactly the "reads/writes climbing just from the tab being open" behavior
- we don't want. Without these attached, syncing only happens on the
- explicit sign-in/reload catch-up pass above.
- ----------------------------------------------------------------- */
+ Kept here in case real-time cross-device sync is wanted again later, but
+ these are not called anywhere in the current flow. The problem with
+ real-time listeners is that every confirmed write triggers a matching
+ read via the listener attached to that same collection, which reproduces
+ exactly the "reads/writes climbing just because the tab is open" behavior
+ this module is designed to avoid. As long as these stay unattached, sync
+ only happens during the explicit sign-in/reload catch-up pass above.
+ -----------------------------------------------------------------
+*/
 function attachRemoteListeners() {
   if (booksListenerUnsub || groupsListenerUnsub) {
     detachRemoteListeners();

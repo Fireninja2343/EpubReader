@@ -36,7 +36,10 @@ function fetchLocalLibrary() {
     loadedBooksMemory = booksRequest.result;
     groupsRequest.onsuccess = () => {
       loadedGroupsMemory = groupsRequest.result;
-      sortLibrary(); // Automatically sorts data via chosen parameters controls routines
+      /* Re-sort the in-memory library list according to whatever sort
+         option (title, date added, progress, etc.) the user currently
+         has selected, so the UI reflects that ordering right away. */
+      sortLibrary();
     };
   };
 }
@@ -53,8 +56,13 @@ function saveBookToDatabase(title, coverData, binaryData) {
     scrollOffset: 0,
     isRead: false,
     dateImported: new Date().getTime(),
-    groupId: activeGroupFilterId, // Binds structural item directly inside active working directories scopes
-    lastModified: new Date().getTime(), // Used by Firebase sync to resolve which device has the newer copy
+    /* Whatever group/folder the library is currently filtered to becomes
+       the new book's group, so it lands in the collection the user is
+       actively looking at instead of an unfiled "all books" view. */
+    groupId: activeGroupFilterId,
+    /* Timestamp used later to decide which copy (this device's or the
+       cloud's) is newer when reconciling data during a Firebase sync. */
+    lastModified: new Date().getTime(),
   };
   store.add(entry).onsuccess = (e) => {
     const newId = e.target.result;
@@ -67,11 +75,16 @@ function saveBookToDatabase(title, coverData, binaryData) {
     }
   };
 }
-/* 
- Firestore's free tier caps writes at 20k/day. trackReadingProgress() fires on
- every scroll pixel, so pushing to the cloud on every call burns through that
- cap in minutes of normal reading. IndexedDB still gets written every time
- (that's free and instant) — only the Firestore push is throttled. */
+
+/*
+ Firestore's free tier caps writes at 20k/day. Reading progress is tracked
+ on every scroll pixel, so pushing to the cloud on every single update
+ would burn through that daily cap within minutes of normal reading.
+ IndexedDB is written every time regardless (that's local, free, and
+ instant) — only the Firestore push is throttled, using the timestamps
+ below to make sure at most one cloud write per book happens within each
+ CLOUD_PROGRESS_PUSH_INTERVAL_MS window.
+*/
 let lastCloudProgressPush = {};
 const CLOUD_PROGRESS_PUSH_INTERVAL_MS = 20000;
 
@@ -98,9 +111,14 @@ function updateBookProgressInDB(bookId, spinePointer, scrollPosition) {
   };
 }
 
-// Bypasses the throttle above — call this right before we're about to lose
-// track of the in-memory reading session (closing the book, tab backgrounded,
-// tab closing) so the last few seconds of progress still reach the cloud.
+/*
+ Sends the latest reading progress to the cloud immediately, ignoring the
+ throttle above. This should be called right before the in-memory reading
+ session is about to be lost — for example when the reader closes the book,
+ the tab is backgrounded, or the tab/window is closing — so the last few
+ seconds of progress aren't dropped by the throttle window. The timestamp
+ is still updated here so this can't fire twice in immediate succession.
+*/
 function forcePushBookProgressToCloud(bookId) {
   if (!bookId || typeof pushBookMetadataToCloud !== "function") return;
   const transaction = db.transaction([STORE_BOOKS], "readonly");

@@ -7,14 +7,21 @@ async function handleFileImport(event) {
 
     const label = document.getElementById("upload-label");
     const totalFiles = files.length;
-    
-    // Process each file sequentially or in parallel depending on system safety
+
+    /*
+     Files are processed one at a time, in order, rather than in parallel.
+     Each import involves unzipping a potentially large EPUB, parsing XML,
+     and decoding cover images, so running several of these at once could
+     spike memory usage and make the browser tab unresponsive on a big
+     batch. Processing sequentially keeps memory use predictable at the
+     cost of total import time.
+    */
     for (let i = 0; i < totalFiles; i++) {
         const file = files[i];
-        
-        // Update header label status to track large batch queues
+
+        // Update the upload button's label so the user can see progress through the batch
         label.innerText = `Processing (${i + 1}/${totalFiles})...`;
-        
+
         try {
             const zip = await JSZip.loadAsync(file);
             const containerFile = await zip.file("META-INF/container.xml").async("string");
@@ -23,17 +30,17 @@ async function handleFileImport(event) {
             const opfPath = containerDoc.querySelector("rootfile").getAttribute("full-path");
             const opfFile = await zip.file(opfPath).async("string");
             const opfDoc = parser.parseFromString(opfFile, "text/xml");
-            
+
             const title = opfDoc.querySelector("title")?.textContent || file.name.replace(".epub", "");
             let coverBase64 = null;
-            
+
             const coverMeta = opfDoc.querySelector('meta[name="cover"]');
             let coverId = coverMeta ? coverMeta.getAttribute("content") : null;
             if (!coverId) {
                 const coverItem = opfDoc.querySelector("item[id*='cover']");
                 if (coverItem) coverId = coverItem.getAttribute("id");
             }
-            
+
             if (coverId) {
                 const itemNode = opfDoc.getElementById(coverId);
                 if (itemNode) {
@@ -47,12 +54,15 @@ async function handleFileImport(event) {
                     }
                 }
             }
-            /*             
-             Uses the shared saveBookToDatabase() helper from 02-db.js instead of
-             writing to IndexedDB directly here — that helper is what stamps
-             isRead/lastModified and pushes the new book (metadata + file) to
-             the cloud. Importing straight into IndexedDB here would silently
-             skip all of that. */
+
+            /*
+             The parsed book is saved through the shared saveBookToDatabase()
+             helper instead of writing directly to IndexedDB here. That
+             shared helper is responsible for setting default fields like
+             isRead and lastModified, and for kicking off the cloud push of
+             both the metadata and the file itself. Writing straight to
+             IndexedDB in this function would silently skip all of that.
+            */
             await new Promise((resolve) => {
                 saveBookToDatabase(title, coverBase64, file);
                 resolve();
@@ -63,11 +73,11 @@ async function handleFileImport(event) {
         }
     }
 
-    // Restore administrative markup layouts once complete
+    // Reset the upload label back to its default, non-progress text
     label.innerText = "➕ Import EPUB";
-    event.target.value = ""; // Clear input buffer
+    event.target.value = ""; // Clear the file input so the same file can be re-selected later
     
-    // Refresh library grids display with newly acquired entries
+    // Reload the library view so the newly imported books show up on screen
     fetchLocalLibrary(); 
 }
 
@@ -112,7 +122,8 @@ async function launchEpubReader(bookObject) {
 
     await parseAndRenderTOC(activeZipInstance, opfDoc, baseDir);
     showReaderState();
-    renderProgressBarTicks(); // Generates structural column ticks elements across progress lines layout canvas
+    // Draw the tick marks along the progress bar, one per chapter boundary
+    renderProgressBarTicks();
     await renderActiveChapterFromZip(activeZipInstance);
     saveAndApplyUserStyles();
     startActiveReadingTimer();
