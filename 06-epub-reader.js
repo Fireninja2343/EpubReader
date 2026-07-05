@@ -171,7 +171,9 @@ async function renderActiveChapterFromZip(zipInstance) {
     frame.classList.add("fade-out");
     setTimeout(() => {
       frame.innerHTML = cleanBody;
+      container.style.scrollBehavior = "auto";
       container.scrollTop = 0;
+      container.style.scrollBehavior = "smooth";
       document.getElementById("chapter-index-display").innerText =
         `${activeSpinePointer + 1} / ${activeSpineArray.length}`;
       trackReadingProgress();
