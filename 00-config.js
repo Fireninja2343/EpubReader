@@ -15,7 +15,7 @@ const Config = {
     FILE_CHUNK_SIZE: 700000,
     CLOUD_PROGRESS_PUSH_INTERVAL_MS: 20000,
   },
-  firebaseConfig = {
+  firebaseConfig: {
     apiKey: "AIzaSyB-lHa5mHi-iMdgGaTe5ehFZE1Xf2T8TkQ",
     authDomain: "epubreader-fire2343.firebaseapp.com",
     projectId: "epubreader-fire2343",
