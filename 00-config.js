@@ -14,5 +14,14 @@ const Config = {
   Sync: {
     FILE_CHUNK_SIZE: 700000,
     CLOUD_PROGRESS_PUSH_INTERVAL_MS: 20000,
+  },
+  firebaseConfig = {
+    apiKey: "AIzaSyB-lHa5mHi-iMdgGaTe5ehFZE1Xf2T8TkQ",
+    authDomain: "epubreader-fire2343.firebaseapp.com",
+    projectId: "epubreader-fire2343",
+    storageBucket: "epubreader-fire2343.firebasestorage.app",
+    messagingSenderId: "171569428425",
+    appId: "1:171569428425:web:7e43e4deb49ab408cdda18",
+    measurementId: "G-QB21V0K0KP",
   }
 };

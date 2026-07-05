@@ -48,27 +48,14 @@ async function handleFileImport(event) {
                 }
             }
             
-            // Core database entry injection helper (from your 02-db.js file)
-            // Passes activeGroupFilterId automatically so if you're inside a folder, they import directly there!
+            // Uses the shared saveBookToDatabase() helper from 02-db.js instead of
+            // writing to IndexedDB directly here — that helper is what stamps
+            // isRead/lastModified and pushes the new book (metadata + file) to
+            // the cloud. Importing straight into IndexedDB here would silently
+            // skip all of that.
             await new Promise((resolve) => {
-                const transaction = db.transaction(["books"], "readwrite");
-                const store = transaction.objectStore("books");
-                const entry = {
-                    title: title,
-                    cover: coverBase64,
-                    fileData: file,
-                    sortOrder: loadedBooksMemory.length,
-                    currentChapter: 0,
-                    scrollOffset: 0,
-                    dateImported: new Date().getTime(),
-                    groupId: activeGroupFilterId 
-                };
-                
-                store.add(entry).onsuccess = () => {
-                    // Update working runtime arrays variables in real-time
-                    loadedBooksMemory.push(entry); 
-                    resolve();
-                };
+                saveBookToDatabase(title, coverBase64, file);
+                resolve();
             });
 
         } catch (err) {

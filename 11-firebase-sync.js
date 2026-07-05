@@ -7,15 +7,7 @@
 // can pull everything down and stay in sync.
 // =================================================================
 
-const firebaseConfig = {
-  apiKey: "AIzaSyB-lHa5mHi-iMdgGaTe5ehFZE1Xf2T8TkQ",
-  authDomain: "epubreader-fire2343.firebaseapp.com",
-  projectId: "epubreader-fire2343",
-  storageBucket: "epubreader-fire2343.firebasestorage.app",
-  messagingSenderId: "171569428425",
-  appId: "1:171569428425:web:7e43e4deb49ab408cdda18",
-  measurementId: "G-QB21V0K0KP",
-};
+const firebaseConfig = config.firebaseConfig;
 
 firebase.initializeApp(firebaseConfig);
 const fbAuth = firebase.auth();
@@ -35,6 +27,24 @@ let currentUser = null;
 let booksListenerUnsub = null;
 let groupsListenerUnsub = null;
 let initialSyncInProgress = false;
+
+// Guards against re-running the whole sync setup every time Firebase re-emits
+// onAuthStateChanged for the SAME user (token refresh, mobile tab resume,
+// reconnect, etc.). Without this, attachRemoteListeners()/pullInitialSyncFromCloud()
+// were firing repeatedly, doing a full re-scan of the whole library each time —
+// which is the leading suspect for the runaway read/write counts.
+let syncedUid = null;
+
+// Simple visibility into how many Firestore writes we're actually issuing,
+// so a repeat of the write-storm shows hard numbers in the console instead
+// of guesswork.
+let cloudWriteCount = 0;
+function logCloudWrite(label) {
+  cloudWriteCount++;
+  if (cloudWriteCount % 10 === 0 || cloudWriteCount <= 5) {
+    console.log(`[FirebaseSync] cloud write #${cloudWriteCount} (${label})`);
+  }
+}
 
 // -----------------------------------------------------------------
 // AUTH
@@ -57,16 +67,28 @@ fbAuth.getRedirectResult().catch((err) => {
 
 function signOutOfSync() {
   detachRemoteListeners();
+  syncedUid = null;
   fbAuth.signOut();
 }
 
 fbAuth.onAuthStateChanged((user) => {
   currentUser = user;
   updateSyncUI();
+
   if (user) {
+    if (syncedUid === user.uid) {
+      // Same user Firebase already told us about this session — this is a
+      // token refresh / reconnect re-emission, not a real new sign-in.
+      // Re-running the full sync here is what was likely causing the
+      // runaway read/write counts, so we deliberately skip it.
+      console.log("[FirebaseSync] onAuthStateChanged fired again for the same user — skipping re-sync");
+      return;
+    }
+    syncedUid = user.uid;
     attachRemoteListeners();
     pullInitialSyncFromCloud();
   } else {
+    syncedUid = null;
     detachRemoteListeners();
   }
 });
@@ -100,6 +122,7 @@ function groupsCollection() {
 async function pushBookMetadataToCloud(book) {
   if (!currentUser || !book || book.id == null) return;
   if (book.isRead === undefined) book.isRead = false; // Ensure isRead is always defined
+  logCloudWrite(`book metadata #${book.id}`);
   await booksCollection()
     .doc(String(book.id))
     .set(
@@ -143,13 +166,16 @@ async function pushBookFileToCloud(book) {
   const existing = await chunkCollection.get();
   const staleDocs = existing.docs.filter((d) => Number(d.id) >= chunks.length);
   for (const staleDoc of staleDocs) {
+    logCloudWrite(`stale chunk delete #${book.id}`);
     await staleDoc.ref.delete();
   }
 
   for (let idx = 0; idx < chunks.length; idx++) {
+    logCloudWrite(`file chunk #${book.id}/${idx}`);
     await chunkCollection.doc(String(idx)).set({ data: chunks[idx] });
   }
 
+  logCloudWrite(`chunkCount update #${book.id}`);
   await booksCollection()
     .doc(String(book.id))
     .set({ chunkCount: chunks.length }, { merge: true });
@@ -157,6 +183,7 @@ async function pushBookFileToCloud(book) {
 
 async function pushGroupToCloud(group) {
   if (!currentUser || !group || group.id == null) return;
+  logCloudWrite(`group #${group.id}`);
   await groupsCollection()
     .doc(String(group.id))
     .set(
@@ -198,6 +225,7 @@ async function deleteGroupFromCloud(groupId) {
 async function pullInitialSyncFromCloud() {
   if (!currentUser || initialSyncInProgress) return;
   initialSyncInProgress = true;
+  console.log("[FirebaseSync] running pullInitialSyncFromCloud()");
 
   try {
     const [remoteBooksSnap, remoteGroupsSnap] = await Promise.all([
@@ -339,6 +367,14 @@ async function downloadBookFromCloud(bookId, remoteMeta) {
 // LIVE LISTENERS: cloud change while this device is open -> pull it in immediately
 // -----------------------------------------------------------------
 function attachRemoteListeners() {
+  // Guard against leaking a duplicate listener if this ever gets called twice
+  // without an intervening detach (shouldn't happen now with the syncedUid
+  // guard above, but cheap insurance).
+  if (booksListenerUnsub || groupsListenerUnsub) {
+    console.log("[FirebaseSync] attachRemoteListeners() called while listeners already active — detaching old ones first");
+    detachRemoteListeners();
+  }
+
   booksListenerUnsub = booksCollection().onSnapshot((snapshot) => {
     snapshot.docChanges().forEach(async (change) => {
       if (change.doc.metadata.hasPendingWrites) return; // this is our own outgoing write, ignore it
