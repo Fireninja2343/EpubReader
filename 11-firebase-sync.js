@@ -1,49 +1,73 @@
-// =================================================================
-// FIREBASE CLOUD SYNC MODULE
-// IndexedDB stays the source of truth for offline use. This module
-// mirrors book metadata / reading progress to Firestore, and the
-// actual .epub binaries as chunked base64 text also inside Firestore
-// (no Firebase Storage / no billing plan needed), so a second device
-// can pull everything down and stay in sync.
-// =================================================================
+/*
+ =================================================================
+ FIREBASE CLOUD SYNC MODULE
+ IndexedDB stays the source of truth for offline use. This module
+ mirrors book metadata / reading progress to Firestore, and the
+ actual .epub binaries as chunked base64 text also inside Firestore
+ (no Firebase Storage / no billing plan needed).
 
-const firebaseConfig = Config.firebaseConfig;
+ SYNC MODEL (deliberately NOT real-time):
+ - On sign-in (or every fresh page load while already signed in), we do
+   ONE catch-up pass: pull down anything new from the cloud, push up
+   anything that's only local.
+ - While reading, progress pushes to the cloud AT MOST once per 20s per
+   book (see throttledCloudPush in 02-db.js), no matter how much you
+   scroll or how often the app calls updateBookProgressInDB.
+ - Closing a book ("Back to Library") forces one final push so the last
+   few seconds of a session aren't lost to the throttle window — that is
+   the ONLY thing allowed to bypass the 20s throttle, and even it has its
+   own short minimum gap so it can't double-push.
+ - There is deliberately NO live listener and NO push on tab-switch/
+   backgrounding anymore — both were sources of uncapped, un-throttled
+   Firestore reads/writes just from having the app open. That means
+   changes made on another device won't appear here until  reload or
+   re-sign-in — a real trade-off, made on purpose to keep this at zero
+   background cost.
+ ================================================================= */
+
+const firebaseConfig = {
+  apiKey: "AIzaSyB-lHa5mHi-iMdgGaTe5ehFZE1Xf2T8TkQ",
+  authDomain: "epubreader-fire2343.firebaseapp.com",
+  projectId: "epubreader-fire2343",
+  storageBucket: "epubreader-fire2343.firebasestorage.app",
+  messagingSenderId: "171569428425",
+  appId: "1:171569428425:web:7e43e4deb49ab408cdda18",
+  measurementId: "G-QB21V0K0KP",
+};
 
 firebase.initializeApp(firebaseConfig);
 const fbAuth = firebase.auth();
 const fbDb = firebase.firestore();
+/*
+ NOTE: Firestore's own offline-persistence cache (enablePersistence()) is
+ intentionally NOT enabled. That cache keeps a local queue of un-sent
+ writes across reloads, and if writes keep failing, that queue can grow
+ and never fully drain — every reload then replays the pile-up and
+ immediately floods the write stream again. The app's own IndexedDB is
+ already the durable local store, so Firestore doesn't need a second one.
 
-// Keep working offline: Firestore caches locally and syncs when back online
-fbDb.enablePersistence().catch(() => {
-  // Multiple tabs open, or browser doesn't support it — sync will still work, just without offline cache
-});
-
-// Firestore caps a single document at ~1MiB. EPUB files are stored as base64 text
-// split across several small documents in a "fileChunks" subcollection so we never
-// hit that ceiling. 700,000 characters keeps each chunk safely under the limit.
+ Firestore caps a single document at ~1MiB. EPUB files are stored as base64 text
+ split across several small documents in a "fileChunks" subcollection so we never
+ hit that ceiling. 700,000 characters keeps each chunk safely under the limit.
+*/
 const FILE_CHUNK_SIZE = Config.Sync.FILE_CHUNK_SIZE;
 
 let currentUser = null;
 let booksListenerUnsub = null;
 let groupsListenerUnsub = null;
 let initialSyncInProgress = false;
-
-// Guards against re-running the whole sync setup every time Firebase re-emits
-// onAuthStateChanged for the SAME user (token refresh, mobile tab resume,
-// reconnect, etc.). Without this, attachRemoteListeners()/pullInitialSyncFromCloud()
-// were firing repeatedly, doing a full re-scan of the whole library each time —
-// which is the leading suspect for the runaway read/write counts.
+/*
+ Guards against re-running the whole sync setup every time Firebase re-emits
+ onAuthStateChanged for the SAME user (token refresh, mobile tab resume,
+ reconnect, etc.) within one page load.
+*/
 let syncedUid = null;
 
-// Simple visibility into how many Firestore writes we're actually issuing,
-// so a repeat of the write-storm shows hard numbers in the console instead
-// of guesswork.
+// Simple visibility into how many Firestore writes we're actually issuing.
 let cloudWriteCount = 0;
 function logCloudWrite(label) {
   cloudWriteCount++;
-  if (cloudWriteCount % 10 === 0 || cloudWriteCount <= 5) {
-    console.log(`[FirebaseSync] cloud write #${cloudWriteCount} (${label})`);
-  }
+  console.log(`[FirebaseSync] cloud write #${cloudWriteCount} (${label})`);
 }
 
 // -----------------------------------------------------------------
@@ -66,7 +90,6 @@ fbAuth.getRedirectResult().catch((err) => {
 });
 
 function signOutOfSync() {
-  detachRemoteListeners();
   syncedUid = null;
   fbAuth.signOut();
 }
@@ -77,19 +100,13 @@ fbAuth.onAuthStateChanged((user) => {
 
   if (user) {
     if (syncedUid === user.uid) {
-      // Same user Firebase already told us about this session — this is a
-      // token refresh / reconnect re-emission, not a real new sign-in.
-      // Re-running the full sync here is what was likely causing the
-      // runaway read/write counts, so we deliberately skip it.
       console.log("[FirebaseSync] onAuthStateChanged fired again for the same user — skipping re-sync");
       return;
     }
     syncedUid = user.uid;
-    attachRemoteListeners();
     pullInitialSyncFromCloud();
   } else {
     syncedUid = null;
-    detachRemoteListeners();
   }
 });
 
@@ -159,10 +176,6 @@ async function pushBookFileToCloud(book) {
     .doc(String(book.id))
     .collection("fileChunks");
 
-  // Clean up leftover chunks if this version of the file is smaller than a previous upload.
-  // Writes are done ONE AT A TIME (not Promise.all) — firing dozens of chunk writes
-  // simultaneously is exactly what triggers Firestore's "write stream exhausted" error
-  // when syncing a whole library for the first time.
   const existing = await chunkCollection.get();
   const staleDocs = existing.docs.filter((d) => Number(d.id) >= chunks.length);
   for (const staleDoc of staleDocs) {
@@ -181,19 +194,24 @@ async function pushBookFileToCloud(book) {
     .set({ chunkCount: chunks.length }, { merge: true });
 }
 
+// Group pushes go through the SAME shared throttle as book progress
+// (defined in 02-db.js) — no more than one push per group per 20s, even
+// from rapid edits.
 async function pushGroupToCloud(group) {
   if (!currentUser || !group || group.id == null) return;
-  logCloudWrite(`group #${group.id}`);
-  await groupsCollection()
-    .doc(String(group.id))
-    .set(
-      {
-        name: group.name ?? null,
-        backgroundColor: group.backgroundColor ?? null,
-        lastModified: Date.now(),
-      },
-      { merge: true },
-    );
+  throttledCloudPush(`group:${group.id}`, async () => {
+    logCloudWrite(`group #${group.id}`);
+    await groupsCollection()
+      .doc(String(group.id))
+      .set(
+        {
+          name: group.name ?? null,
+          backgroundColor: group.backgroundColor ?? null,
+          lastModified: Date.now(),
+        },
+        { merge: true },
+      );
+  });
 }
 
 async function deleteBookFromCloud(bookId) {
@@ -220,7 +238,7 @@ async function deleteGroupFromCloud(groupId) {
 }
 
 // -----------------------------------------------------------------
-// PULL: cloud -> local (one-time catch-up run right after sign-in)
+// PULL: cloud -> local (one-time catch-up run right after sign-in / reload)
 // -----------------------------------------------------------------
 async function pullInitialSyncFromCloud() {
   if (!currentUser || initialSyncInProgress) return;
@@ -240,7 +258,6 @@ async function pullInitialSyncFromCloud() {
       remoteGroupsSnap.docs.map((d) => Number(d.id)),
     );
 
-    // Groups are small, just upsert them directly
     await new Promise((resolve) => {
       const tx = db.transaction([STORE_GROUPS], "readwrite");
       const groupsStore = tx.objectStore(STORE_GROUPS);
@@ -250,8 +267,6 @@ async function pullInitialSyncFromCloud() {
       tx.oncomplete = resolve;
     });
 
-    // Any group that only exists on THIS device (e.g. this is the very first
-    // sign-in and the cloud is still empty) needs to be pushed up
     for (const group of loadedGroupsMemory) {
       if (!remoteGroupIds.has(group.id)) {
         await pushGroupToCloud(group);
@@ -264,19 +279,14 @@ async function pullInitialSyncFromCloud() {
       const localBook = loadedBooksMemory.find((b) => b.id === bookId);
 
       if (!localBook) {
-        // Book doesn't exist on this device yet — pull the file down and create it
         await downloadBookFromCloud(bookId, remote);
       } else if ((remote.lastModified || 0) > (localBook.lastModified || 0)) {
-        // Cloud copy is newer (e.g. progress made on the other device) — apply it
         await applyRemoteBookUpdate(bookId, remote);
       } else if ((localBook.lastModified || 0) > (remote.lastModified || 0)) {
-        // This device has the newer copy — push it back up
         await pushBookMetadataToCloud(localBook);
       }
     }
 
-    // Any book that only exists on THIS device and has never been pushed
-    // (first sign-in, or it was imported while offline) needs a full upload
     for (const book of loadedBooksMemory) {
       if (!remoteBookIds.has(book.id)) {
         await pushBookMetadataToCloud(book);
@@ -324,7 +334,7 @@ function applyRemoteBookUpdate(bookId, remote) {
 
 async function downloadBookFromCloud(bookId, remoteMeta) {
   try {
-    if (!remoteMeta.chunkCount) return; // file hasn't finished uploading from the other device yet — will retry on next sync
+    if (!remoteMeta.chunkCount) return;
 
     const chunkCollection = booksCollection()
       .doc(String(bookId))
@@ -335,7 +345,7 @@ async function downloadBookFromCloud(bookId, remoteMeta) {
       chunkSnaps.push(await chunkCollection.doc(String(idx)).get());
     }
 
-    if (chunkSnaps.some((snap) => !snap.exists)) return; // still mid-upload, retry later
+    if (chunkSnaps.some((snap) => !snap.exists)) return;
 
     const base64DataUrl = chunkSnaps.map((snap) => snap.data().data).join("");
     const blob = base64ToBlob(base64DataUrl);
@@ -358,26 +368,27 @@ async function downloadBookFromCloud(bookId, remoteMeta) {
       tx.oncomplete = resolve;
     });
   } catch (err) {
-    // The metadata doc may exist slightly before the file finishes uploading from the other device — safe to skip and retry on next sync
     console.warn(`Could not download book ${bookId} from cloud yet:`, err);
   }
 }
 
-// -----------------------------------------------------------------
-// LIVE LISTENERS: cloud change while this device is open -> pull it in immediately
-// -----------------------------------------------------------------
+/* -----------------------------------------------------------------
+ LIVE LISTENERS — DEFINED BUT NOT USED
+ Kept here in case of ever wanting a real-time cross-device sync back later, but
+ they are not called anywhere right now. Real-time listeners mean every
+ confirmed write triggers a matching read via your own listener, which is
+ exactly the "reads/writes climbing just from the tab being open" behavior
+ we don't want. Without these attached, syncing only happens on the
+ explicit sign-in/reload catch-up pass above.
+ ----------------------------------------------------------------- */
 function attachRemoteListeners() {
-  // Guard against leaking a duplicate listener if this ever gets called twice
-  // without an intervening detach (shouldn't happen now with the syncedUid
-  // guard above, but cheap insurance).
   if (booksListenerUnsub || groupsListenerUnsub) {
-    console.log("[FirebaseSync] attachRemoteListeners() called while listeners already active — detaching old ones first");
     detachRemoteListeners();
   }
 
   booksListenerUnsub = booksCollection().onSnapshot((snapshot) => {
     snapshot.docChanges().forEach(async (change) => {
-      if (change.doc.metadata.hasPendingWrites) return; // this is our own outgoing write, ignore it
+      if (change.doc.metadata.hasPendingWrites) return;
 
       const remote = change.doc.data();
       const bookId = Number(change.doc.id);
@@ -424,25 +435,3 @@ function detachRemoteListeners() {
   booksListenerUnsub = null;
   groupsListenerUnsub = null;
 }
-
-// -----------------------------------------------------------------
-// SAFETY NET: flush the last reading position on tab close/backgrounding.
-// Regular progress pushes are throttled (see 02-db.js), so without this,
-// backgrounding the app or closing the tab mid-chapter could leave the
-// cloud copy a bit stale (the local IndexedDB copy is always current).
-// -----------------------------------------------------------------
-document.addEventListener("visibilitychange", () => {
-  if (
-    document.visibilityState === "hidden" &&
-    activeBookObject &&
-    typeof forcePushBookProgressToCloud === "function"
-  ) {
-    forcePushBookProgressToCloud(activeBookObject.id);
-  }
-});
-
-window.addEventListener("pagehide", () => {
-  if (activeBookObject && typeof forcePushBookProgressToCloud === "function") {
-    forcePushBookProgressToCloud(activeBookObject.id);
-  }
-});

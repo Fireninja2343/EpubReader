@@ -64,29 +64,54 @@ function triggerContextAction(actionKey) {
         if (confirm(`Remove "${targetBookObj.title}" from library completely?`)) {
             const transaction = db.transaction([STORE_BOOKS], "readwrite");
             transaction.objectStore(STORE_BOOKS).delete(targetBookObj.id);
-            transaction.oncomplete = () => { fetchLocalLibrary(); };
+            transaction.oncomplete = () => {
+                fetchLocalLibrary();
+                /* Mirror the deletion up to Firestore too. Without this call the
+                   book only disappears locally — the cloud doc (and its file
+                   chunks) stay behind, so the next sign-in or live-listener pull
+                   on any device just downloads it right back. */
+                if (typeof deleteBookFromCloud === "function") {
+                    deleteBookFromCloud(targetBookObj.id);
+                }
+            };
         }
     } else if (actionKey === 'toggleRead') {
         const transaction = db.transaction([STORE_BOOKS], "readwrite");
         const store = transaction.objectStore(STORE_BOOKS);
+        let updatedRecord = null;
         store.get(targetBookObj.id).onsuccess = (e) => {
             const r = e.target.result;
             r.isRead = !r.isRead; // Toggle binary state
+            r.lastModified = new Date().getTime(); // Needed so the cloud/other devices know this copy is newer
             store.put(r);
+            updatedRecord = r;
         };
-        transaction.oncomplete = () => { fetchLocalLibrary(); };
+        transaction.oncomplete = () => {
+            fetchLocalLibrary();
+            if (updatedRecord && typeof pushBookMetadataToCloud === "function") {
+                pushBookMetadataToCloud(updatedRecord);
+            }
+        };
     } else if (actionKey === 'metadata' || actionKey === 'stats') {
         openBookDiagnosticsModal(targetBookObj, actionKey);
     } else if (actionKey === 'group') {
         const groupName = prompt("Enter Group ID Key or leave blank to clear group binding alignment values:");
         const transaction = db.transaction([STORE_BOOKS], "readwrite");
         const store = transaction.objectStore(STORE_BOOKS);
+        let updatedRecord = null;
         store.get(targetBookObj.id).onsuccess = (e) => {
             const r = e.target.result;
             r.groupId = groupName ? parseInt(groupName) : null;
+            r.lastModified = new Date().getTime(); // Needed so the cloud/other devices know this copy is newer
             store.put(r);
+            updatedRecord = r;
         };
-        transaction.oncomplete = () => { fetchLocalLibrary(); };
+        transaction.oncomplete = () => {
+            fetchLocalLibrary();
+            if (updatedRecord && typeof pushBookMetadataToCloud === "function") {
+                pushBookMetadataToCloud(updatedRecord);
+            }
+        };
     }
 }
 

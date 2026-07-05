@@ -67,11 +67,11 @@ function saveBookToDatabase(title, coverData, binaryData) {
     }
   };
 }
-
-// Firestore's free tier caps writes at 20k/day. trackReadingProgress() fires on
-// every scroll pixel, so pushing to the cloud on every call burns through that
-// cap in minutes of normal reading. IndexedDB still gets written every time
-// (that's free and instant) — only the Firestore push is throttled.
+/* 
+ Firestore's free tier caps writes at 20k/day. trackReadingProgress() fires on
+ every scroll pixel, so pushing to the cloud on every call burns through that
+ cap in minutes of normal reading. IndexedDB still gets written every time
+ (that's free and instant) — only the Firestore push is throttled. */
 let lastCloudProgressPush = {};
 const CLOUD_PROGRESS_PUSH_INTERVAL_MS = 20000;
 

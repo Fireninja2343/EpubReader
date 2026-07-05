@@ -260,7 +260,7 @@ function changeActiveTheme(themeKey) {
 
 // =================================================================
 // END-OF-CHAPTER "NEXT CHAPTER" BANNER
-// Triggered by trackReadingProgress() once you scroll past 95% of a chapter.
+// Triggered by trackReadingProgress() once scrolled past 95% of a chapter.
 // =================================================================
 function injectChapterEndBanner() {
   const frame = document.getElementById("text-render-frame");

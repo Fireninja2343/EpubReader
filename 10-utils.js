@@ -81,11 +81,12 @@ function countVisibleWords() {
   return words;
 }
 
-// Converts "words currently visible" into "pixels to scroll this tick."
-// pixelsPerWord is the thing that actually varies with density — a dense
-// page has a SMALL pixelsPerWord (words are packed tight), so TARGET_WORDS_PER_TICK
-// worth of them takes few pixels. A sparse page has a LARGE pixelsPerWord,
-// so the same word target takes more pixels.
+/* 
+ Converts "words currently visible" into "pixels to scroll this tick."
+ pixelsPerWord is the thing that actually varies with density — a dense
+ page has a SMALL pixelsPerWord (words are packed tight), so TARGET_WORDS_PER_TICK
+ worth of them takes few pixels. A sparse page has a LARGE pixelsPerWord,
+ so the same word target takes more pixels. */
 function computeAdaptiveStepPx() {
   const container = document.getElementById("reader-container");
   if (!container) return FALLBACK_STEP_PX;

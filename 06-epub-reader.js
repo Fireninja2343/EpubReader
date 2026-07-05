@@ -12,7 +12,7 @@ async function handleFileImport(event) {
     for (let i = 0; i < totalFiles; i++) {
         const file = files[i];
         
-        // Update header label status so you can track large batch queues
+        // Update header label status to track large batch queues
         label.innerText = `Processing (${i + 1}/${totalFiles})...`;
         
         try {
@@ -47,12 +47,12 @@ async function handleFileImport(event) {
                     }
                 }
             }
-            
-            // Uses the shared saveBookToDatabase() helper from 02-db.js instead of
-            // writing to IndexedDB directly here — that helper is what stamps
-            // isRead/lastModified and pushes the new book (metadata + file) to
-            // the cloud. Importing straight into IndexedDB here would silently
-            // skip all of that.
+            /*             
+             Uses the shared saveBookToDatabase() helper from 02-db.js instead of
+             writing to IndexedDB directly here — that helper is what stamps
+             isRead/lastModified and pushes the new book (metadata + file) to
+             the cloud. Importing straight into IndexedDB here would silently
+             skip all of that. */
             await new Promise((resolve) => {
                 saveBookToDatabase(title, coverBase64, file);
                 resolve();
