@@ -52,11 +52,23 @@ function handleProgressBarClick(event) {
 function trackReadingProgress() {
     const container = document.getElementById("reader-container");
     const top = container.scrollTop;
-    const maxScroll = container.scrollHeight - container.clientHeight;
+
+    /*
+     The end-of-chapter banner gets appended into the text frame itself
+     once innerPct crosses 0.95, which grows scrollHeight right after the
+     user has already scrolled near the bottom. Left uncorrected, maxScroll
+     keeps growing out from under the user and innerPct (and therefore the
+     global book percentage) can never actually reach 100%. Subtracting the
+     banner's own height from maxScroll keeps the denominator pinned to the
+     real chapter content.
+    */
+    const banner = document.getElementById("chapter-end-action-banner");
+    const bannerHeight = banner ? banner.offsetHeight : 0;
+    const maxScroll = Math.max(0, container.scrollHeight - container.clientHeight - bannerHeight);
     
     // 1. CALCULATE STANDALONE CHAPTER METRICS
     // Determine the exact position inside the active single text node
-    const innerPct = maxScroll > 0 ? (top / maxScroll) : 0;
+    const innerPct = maxScroll > 0 ? Math.min(1, top / maxScroll) : 1;
     const chapterProgressPercentage = Math.round(innerPct * 100);
     
     // Inject immediately into your new chapter metrics indicator label
@@ -84,6 +96,14 @@ function trackReadingProgress() {
     // Fire next chapter call invitation block if hitting the final layout stretch
     if (innerPct >= 0.95 && !document.getElementById("chapter-end-action-banner")) {
         injectChapterEndBanner();
+    }
+
+    // Once the reader has genuinely scrolled to the bottom of the last chapter
+    // (innerPct can now actually reach 1 since the banner is excluded above),
+    // mark the book as finished so stats/library views stop showing it as in-progress.
+    const isLastChapter = activeSpinePointer >= activeSpineArray.length - 1;
+    if (isLastChapter && innerPct >= 1 && activeBookObject && !activeBookObject.isRead) {
+        markBookAsRead(activeBookObject.id);
     }
     
     // Commit current positions background states mutations to IndexedDB

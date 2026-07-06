@@ -119,6 +119,33 @@ function updateBookProgressInDB(bookId, spinePointer, scrollPosition) {
  seconds of progress aren't dropped by the throttle window. The timestamp
  is still updated here so this can't fire twice in immediate succession.
 */
+/*
+ Flips a book's isRead flag to true and syncs the change locally and to the
+ cloud. Called from trackReadingProgress() once the user has actually
+ scrolled to the bottom of the last chapter, so books don't stay stuck at
+ "In Progress" just because the user never opened the context menu to
+ toggle read status manually.
+*/
+function markBookAsRead(bookId) {
+  if (!bookId || !db) return;
+  const transaction = db.transaction([STORE_BOOKS], "readwrite");
+  const store = transaction.objectStore(STORE_BOOKS);
+  store.get(bookId).onsuccess = (e) => {
+    const record = e.target.result;
+    if (record && !record.isRead) {
+      record.isRead = true;
+      record.lastModified = new Date().getTime();
+      store.put(record);
+      if (activeBookObject && activeBookObject.id === bookId) {
+        activeBookObject.isRead = true;
+      }
+      if (typeof pushBookMetadataToCloud === "function") {
+        pushBookMetadataToCloud(record);
+      }
+    }
+  };
+}
+
 function forcePushBookProgressToCloud(bookId) {
   if (!bookId || typeof pushBookMetadataToCloud !== "function") return;
   const transaction = db.transaction([STORE_BOOKS], "readonly");
