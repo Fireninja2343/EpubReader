@@ -77,6 +77,7 @@ function showLibraryState() {
     }
 
     activeBookObject = null;
+    stopActiveReadingTimer();
     fetchLocalLibrary();
 }
 

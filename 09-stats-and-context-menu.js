@@ -4,22 +4,42 @@
 window.addEventListener("focus", startActiveReadingTimer);
 window.addEventListener("blur", stopActiveReadingTimer);
 
+/*
+ focus/blur alone are the weaker signal for "is this tab actually the one being looked at"
+ some window-manager / devtools / PWA window-switching cases don't fire them reliably.
+ The Page Visibility API's hidden/visible state is the API actually meant for this and fires more consistently,
+ so it's layered on top as a second, more reliable check covering the same "tab is selected" requirement.
+*/
+document.addEventListener("visibilitychange", () => {
+    if (document.hidden) {
+        stopActiveReadingTimer();
+    } else if (document.hasFocus()) {
+        startActiveReadingTimer();
+    }
+});
+
 function startActiveReadingTimer() {
     if (focusedTimeTrackerHeartbeatInterval) return;
     focusedTimeTrackerHeartbeatInterval = setInterval(() => {
         // Condition: Must be inside a book workspace layer, and tab window must be active focus target
         const readerActive = document.getElementById("reader-view").classList.contains("active");
-        if (readerActive && activeBookObject && document.hasFocus()) {
+        if (readerActive && activeBookObject && document.hasFocus() && !document.hidden) {
             if (!activeBookObject.timeSpentSeconds) activeBookObject.timeSpentSeconds = 0;
             activeBookObject.timeSpentSeconds += 2; // Increments ticker loop heartbeat frequency step bounds
 
-            // Background storage silent database persistence updates loops
+            /*
+             activeBookObject is already the in-memory source of truth and was
+             just incremented above, so the record can be written directly
+             instead of doing a separate get() + re-incrementing a second
+             counter - that was duplicating the same +2 in two places that
+             only stayed in sync by coincidence.
+            */
             const transaction = db.transaction([STORE_BOOKS], "readwrite");
             const store = transaction.objectStore(STORE_BOOKS);
             store.get(activeBookObject.id).onsuccess = (e) => {
                 const record = e.target.result;
                 if (record) {
-                    record.timeSpentSeconds = (record.timeSpentSeconds || 0) + 2;
+                    record.timeSpentSeconds = activeBookObject.timeSpentSeconds;
                     store.put(record);
                 }
             };
