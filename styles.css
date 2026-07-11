@@ -569,8 +569,8 @@ footer {
     border: 2px solid hsl(
         from var(--card-color)
         h
-        calc(s + 10)
-        calc(l + 10)
+        calc(s*1.5)
+        calc(l*1.5)
     );
     border-radius: 6px;
     padding: 15px;
@@ -587,8 +587,8 @@ footer {
     border-color: hsl(
         from var(--card-color)
         h
-        calc(s + 20)
-        calc(l + 20)
+        calc(s*2)
+        calc(l*2)
     );
 }
 
