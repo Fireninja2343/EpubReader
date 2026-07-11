@@ -63,10 +63,17 @@ async function handleFileImport(event) {
              both the metadata and the file itself. Writing straight to
              IndexedDB in this function would silently skip all of that.
             */
-            await new Promise((resolve) => {
-                saveBookToDatabase(title, coverBase64, file);
-                resolve();
-            });
+            /*
+             saveBookToDatabase() now returns a Promise that resolves once the
+             IndexedDB write actually finishes (see 02-db.js). Previously this
+             wrapped it in a Promise that resolved immediately regardless, so
+             the "process files one at a time" sequencing described above
+             wasn't real: every file's IndexedDB write was fired off and the
+             loop moved on to the next file's parsing before it finished,
+             which could make sortOrder (based on loadedBooksMemory.length at
+             call time) collide across a batch import.
+            */
+            await saveBookToDatabase(title, coverBase64, file);
 
         } catch (err) {
             console.error(`Failed parsing compilation profile for file: ${file.name}`, err);
@@ -119,6 +126,15 @@ async function launchEpubReader(bookObject) {
     });
 
     activeSpinePointer = bookObject.currentChapter || 0;
+    /*
+     Records the chapter this book was already at (as loaded from IndexedDB/
+     cloud) as the "last pushed" baseline. Without this, the very first
+     trackReadingProgress() call after opening the book would look like a
+     chapter change (since lastPushedChapterIndex still holds whatever the
+     previously-open book left behind) and would trigger a needless
+     immediate cloud push right on open.
+    */
+    lastPushedChapterIndex = activeSpinePointer;
 
     await parseAndRenderTOC(activeZipInstance, opfDoc, baseDir);
     showReaderState();
@@ -188,6 +204,16 @@ async function renderActiveChapterFromZip(zipInstance) {
 async function parseAndRenderTOC(zip, opfDoc, baseDir) {
   const tocList = document.getElementById("toc-render-list");
   tocList.innerHTML = "";
+
+  /*
+   Default every chapter to a plain "Chapter N" label first. Not every
+   spine entry necessarily has a matching TOC nav point (some EPUBs point
+   their TOC at only a subset of files, e.g. chapter starts but not
+   sub-sections), so this guarantees the progress bar tooltip always has
+   something sensible to show even where the TOC below doesn't cover it.
+  */
+  activeChapterTitles = activeSpineArray.map((_, idx) => `Chapter ${idx + 1}`);
+
   let tocItem =
     opfDoc.querySelector("item[media-type='application/x-dtbncx+xml']") ||
     opfDoc.querySelector("item[properties='nav']");
@@ -207,13 +233,17 @@ async function parseAndRenderTOC(zip, opfDoc, baseDir) {
       if (!href) return;
       href = href.split("#")[0];
       const absoluteChapterPath = normalizePath(baseDir + href);
+      const matchedSpineIdx = activeSpineArray.indexOf(absoluteChapterPath);
+      // Use this TOC entry's real label for its matching chapter's progress bar tooltip
+      if (matchedSpineIdx !== -1) {
+        activeChapterTitles[matchedSpineIdx] = text;
+      }
       const row = document.createElement("div");
       row.className = "toc-list-item";
       row.innerText = text;
       row.onclick = () => {
-        const targetIdx = activeSpineArray.indexOf(absoluteChapterPath);
-        if (targetIdx !== -1) {
-          activeSpinePointer = targetIdx;
+        if (matchedSpineIdx !== -1) {
+          activeSpinePointer = matchedSpineIdx;
           renderActiveChapterFromZip(activeZipInstance);
         }
       };

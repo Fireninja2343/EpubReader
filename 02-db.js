@@ -22,6 +22,16 @@ function initIndexedDB() {
     db = e.target.result;
     fetchLocalLibrary();
   };
+  // Without this handler, a failure to open IndexedDB (blocked by private
+  // browsing settings, storage quota issues, another tab holding an
+  // incompatible version open, etc.) fails completely silently — the
+  // library just never loads and nothing tells the user why.
+  request.onerror = (e) => {
+    console.error("Failed to open IndexedDB:", e.target.error);
+    alert(
+      "Could not open the local library database. Your browser may be blocking storage (e.g. private browsing mode), or another tab may need to be closed.",
+    );
+  };
 }
 
 function fetchLocalLibrary() {
@@ -44,36 +54,44 @@ function fetchLocalLibrary() {
   };
 }
 
+// Returns a Promise that resolves only once the book has actually been
+// written to IndexedDB (previously this function returned nothing, so
+// handleFileImport()'s "await saveBookToDatabase(...)" was never really
+// waiting for anything — see the fix in 06-epub-reader.js).
 function saveBookToDatabase(title, coverData, binaryData) {
-  const transaction = db.transaction([STORE_BOOKS], "readwrite");
-  const store = transaction.objectStore(STORE_BOOKS);
-  const entry = {
-    title: title,
-    cover: coverData,
-    fileData: binaryData,
-    sortOrder: loadedBooksMemory.length,
-    currentChapter: 0,
-    scrollOffset: 0,
-    isRead: false,
-    dateImported: new Date().getTime(),
-    /* Whatever group/folder the library is currently filtered to becomes
-       the new book's group, so it lands in the collection the user is
-       actively looking at instead of an unfiled "all books" view. */
-    groupId: activeGroupFilterId,
-    /* Timestamp used later to decide which copy (this device's or the
-       cloud's) is newer when reconciling data during a Firebase sync. */
-    lastModified: new Date().getTime(),
-  };
-  store.add(entry).onsuccess = (e) => {
-    const newId = e.target.result;
-    fetchLocalLibrary();
-    // Push the freshly imported book up to the cloud (no-op if not signed in)
-    if (typeof pushBookMetadataToCloud === "function") {
-      const savedBook = { ...entry, id: newId };
-      pushBookMetadataToCloud(savedBook);
-      pushBookFileToCloud(savedBook);
-    }
-  };
+  return new Promise((resolve) => {
+    const transaction = db.transaction([STORE_BOOKS], "readwrite");
+    const store = transaction.objectStore(STORE_BOOKS);
+    const entry = {
+      title: title,
+      cover: coverData,
+      fileData: binaryData,
+      sortOrder: loadedBooksMemory.length,
+      currentChapter: 0,
+      scrollOffset: 0,
+      isRead: false,
+      dateImported: new Date().getTime(),
+      /* Whatever group/folder the library is currently filtered to becomes
+         the new book's group, so it lands in the collection the user is
+         actively looking at instead of an unfiled "all books" view. */
+      groupId: activeGroupFilterId,
+      /* Timestamp used later to decide which copy (this device's or the
+         cloud's) is newer when reconciling data during a Firebase sync. */
+      lastModified: new Date().getTime(),
+    };
+    store.add(entry).onsuccess = (e) => {
+      const newId = e.target.result;
+      fetchLocalLibrary();
+      // Push the freshly imported book up to the cloud (no-op if not signed in)
+      if (typeof pushBookMetadataToCloud === "function") {
+        const savedBook = { ...entry, id: newId };
+        pushBookMetadataToCloud(savedBook);
+        pushBookFileToCloud(savedBook);
+      }
+    };
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => resolve(); // resolve either way so the import loop doesn't hang forever
+  });
 }
 
 /*
@@ -86,9 +104,11 @@ function saveBookToDatabase(title, coverData, binaryData) {
  CLOUD_PROGRESS_PUSH_INTERVAL_MS window.
 */
 let lastCloudProgressPush = {};
-const CLOUD_PROGRESS_PUSH_INTERVAL_MS = 20000;
+// Reuses the single source of truth in Config instead of a second hardcoded
+// copy of the same number, which could silently drift out of sync with it.
+const CLOUD_PROGRESS_PUSH_INTERVAL_MS = Config.Sync.CLOUD_PROGRESS_PUSH_INTERVAL_MS;
 
-function updateBookProgressInDB(bookId, spinePointer, scrollPosition) {
+function updateBookProgressInDB(bookId, spinePointer, scrollPosition, forceImmediateCloudPush = false) {
   if (!bookId) return;
   const transaction = db.transaction([STORE_BOOKS], "readwrite");
   const store = transaction.objectStore(STORE_BOOKS);
@@ -102,7 +122,14 @@ function updateBookProgressInDB(bookId, spinePointer, scrollPosition) {
       if (typeof pushBookMetadataToCloud === "function") {
         const now = Date.now();
         const last = lastCloudProgressPush[bookId] || 0;
-        if (now - last >= CLOUD_PROGRESS_PUSH_INTERVAL_MS) {
+        /*
+         forceImmediateCloudPush lets a caller (trackReadingProgress, when it
+         detects the chapter itself just changed) bypass the usual 20s
+         throttle for this one push. The timestamp below is still updated
+         either way, so a forced push here also resets the throttle window
+         rather than stacking on top of it.
+        */
+        if (forceImmediateCloudPush || now - last >= CLOUD_PROGRESS_PUSH_INTERVAL_MS) {
           lastCloudProgressPush[bookId] = now;
           pushBookMetadataToCloud(record);
         }

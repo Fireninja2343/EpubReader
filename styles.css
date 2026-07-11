@@ -232,10 +232,8 @@ select {
     -webkit-box-orient: vertical;
 }
 /* 3-Dots Interactive Anchoring Node Trigger Elements Layout */
-.book-card {
-    position: relative;
-    /* Maintain drag rules transitions safely styling constraints */
-}
+/* (position: relative for .book-card is already declared above; this used
+   to be a redundant duplicate .book-card { position: relative } rule.) */
 
 .book-action-trigger-dots {
     position: absolute;
@@ -288,7 +286,7 @@ select {
     padding: 40px 20%;
     scroll-behavior: smooth;
 }
-#close-btn{
+.sidebar-close-btn {
     background-color: var(--accent);
     z-index: 9999;
     color: #000;
@@ -503,10 +501,77 @@ footer {
     opacity: 0.7;
 }
 
+/*
+ One invisible hit-target per chapter, sized to that chapter's share of the
+ bar. Sits below the tick separators (see #chapter-segments-container's
+ position in index.html) so the thin divider lines still render on top of
+ it, but this is what actually reacts to hover.
+*/
+#chapter-segments-container {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    top: 0;
+    left: 0;
+}
+
+.chapter-segment {
+    position: absolute;
+    top: 0;
+    height: 100%;
+    box-sizing: border-box;
+}
+
+.chapter-segment-tooltip {
+    position: absolute;
+    bottom: calc(100% + 10px);
+    left: 50%;
+    transform: translateX(-50%);
+    background-color: var(--bg-card);
+    border: 1px solid var(--border);
+    color: var(--text-main);
+    padding: 4px 10px;
+    border-radius: 4px;
+    font-size: 11px;
+    white-space: nowrap;
+    max-width: 50vw;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.12s ease-in-out;
+    z-index: 20;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
+}
+
+/*
+ Expand-on-hover and the tooltip are gated behind (hover: hover) so touch
+ devices — which have no real hover state and would otherwise get a
+ "sticky" expanded segment after every tap — never trigger this. Desktop
+ pointing devices (mouse/trackpad) are the intended audience here.
+*/
+@media (hover: hover) and (pointer: fine) {
+    .chapter-segment:hover {
+        height: 14px;
+        top: -5px;
+        background-color: var(--accent-dim);
+        border-radius: 2px;
+    }
+
+    .chapter-segment:hover .chapter-segment-tooltip {
+        opacity: 1;
+    }
+}
+
 /* Custom Visual Rules for Folder Group Cards Layout components */
 .group-card {
     background-color: var(--bg-card);
-    border: 2px dashed var(--border);
+    border: 2px solid hsl(
+        from var(--card-color)
+        h
+        calc(s + 10%)
+        calc(l + 5%)
+    );
     border-radius: 6px;
     padding: 15px;
     display: flex;
@@ -519,7 +584,12 @@ footer {
 }
 
 .group-card:hover {
-    border-color: var(--accent);
+    border-color: hsl(
+        from var(--card-color)
+        h
+        calc(s + 20%)
+        calc(l + 15%)
+    );
 }
 
 .group-folder-icon {
@@ -1018,6 +1088,19 @@ footer {
         margin: 0 5px;
     }
 
+    /*
+     On a narrow screen the bar itself is much shorter, so the same number
+     of chapter ticks (which can be 70+ for a long book) sit far closer
+     together than on desktop — close enough that the 2px-wide ticks packed
+     at full opacity effectively tile into one solid strip, hiding the
+     colored fill underneath entirely. Thinning and fading them out here
+     keeps them visible as a reference without blotting out the fill.
+    */
+    .chapter-tick-marker {
+        width: 1px;
+        opacity: 0.35;
+    }
+
     #sign-in {
         right: 10px;
         bottom: 40px;
@@ -1055,5 +1138,16 @@ footer {
     .library-grid {
         grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
         gap: 10px;
+    }
+
+    /*
+     On a phone-width bar even 1px-wide ticks are packed tightly enough
+     (a long book's 70-100+ chapters across ~150-200px of actual bar width)
+     to still visually merge into a solid strip. Hiding them outright reads
+     better here than any further thinning would; the progress fill and the
+     footer's numeric percentage remain the source of truth for position.
+    */
+    #chapter-ticks-container {
+        display: none;
     }
 }

@@ -6,16 +6,44 @@ window.addEventListener("DOMContentLoaded", () => {
 // PROGRESS BAR INTERACTION ROUTINES & RENDERING SPLITS
 // =================================================================
 function renderProgressBarTicks() {
-  const container = document.getElementById("chapter-ticks-container");
-  container.innerHTML = "";
-  if (activeSpineArray.length <= 1) return;
+  const tickContainer = document.getElementById("chapter-ticks-container");
+  const segmentContainer = document.getElementById("chapter-segments-container");
+  tickContainer.innerHTML = "";
+  segmentContainer.innerHTML = "";
+  if (activeSpineArray.length === 0) return;
 
   const segmentWidth = 100 / activeSpineArray.length;
-  for (let i = 1; i < activeSpineArray.length; i++) {
-    const tick = document.createElement("div");
-    tick.className = "chapter-tick-marker";
-    tick.style.left = `${segmentWidth * i}%`;
-    container.appendChild(tick);
+
+  /*
+   One hoverable "chapter segment" div per chapter, sized to that chapter's
+   share of the bar. These sit underneath the tick separators (appended to
+   a container earlier in the DOM, so the tick lines still draw on top of
+   them) and are what actually respond to :hover — expanding slightly and
+   revealing a tooltip with that chapter's title. Built from
+   activeChapterTitles, which parseAndRenderTOC() fills in before this runs.
+  */
+  for (let i = 0; i < activeSpineArray.length; i++) {
+    const segment = document.createElement("div");
+    segment.className = "chapter-segment";
+    segment.style.left = `${segmentWidth * i}%`;
+    segment.style.width = `${segmentWidth}%`;
+
+    const tooltip = document.createElement("div");
+    tooltip.className = "chapter-segment-tooltip";
+    tooltip.innerText = activeChapterTitles[i] || `Chapter ${i + 1}`;
+    segment.appendChild(tooltip);
+
+    segmentContainer.appendChild(segment);
+  }
+
+  // Thin divider ticks marking each chapter boundary (none needed if there's only one chapter)
+  if (activeSpineArray.length > 1) {
+    for (let i = 1; i < activeSpineArray.length; i++) {
+      const tick = document.createElement("div");
+      tick.className = "chapter-tick-marker";
+      tick.style.left = `${segmentWidth * i}%`;
+      tickContainer.appendChild(tick);
+    }
   }
 }
 
@@ -50,6 +78,11 @@ function handleProgressBarClick(event) {
 }
 
 function trackReadingProgress() {
+    // If a book failed to parse (or hasn't loaded yet) activeSpineArray can be
+    // empty, which would otherwise make chapterWeight = 100 / 0 = Infinity and
+    // turn the progress displays into "NaN%" below.
+    if (activeSpineArray.length === 0) return;
+
     const container = document.getElementById("reader-container");
     const top = container.scrollTop;
 
@@ -108,7 +141,23 @@ function trackReadingProgress() {
     
     // Commit current positions background states mutations to IndexedDB
     if (activeBookObject) {
-        updateBookProgressInDB(activeBookObject.id, activeSpinePointer, top);
+        /*
+         Normally cloud pushes are throttled to once per
+         CLOUD_PROGRESS_PUSH_INTERVAL_MS (20s) so scroll-driven updates don't
+         burn through the Firestore write quota. But a chapter change is a
+         much bigger, much rarer jump than a scroll tick, and it's exactly
+         the kind of update that's most valuable to have on the cloud right
+         away — if the tab is closed a minute later without ever returning
+         to the library, the throttle window could otherwise swallow it
+         entirely. So whenever activeSpinePointer differs from the last
+         chapter that was actually pushed, this bypasses the throttle for
+         just this one push.
+        */
+        const chapterHasChangedSinceLastPush = lastPushedChapterIndex !== activeSpinePointer;
+        updateBookProgressInDB(activeBookObject.id, activeSpinePointer, top, chapterHasChangedSinceLastPush);
+        if (chapterHasChangedSinceLastPush) {
+            lastPushedChapterIndex = activeSpinePointer;
+        }
     }
 }
 

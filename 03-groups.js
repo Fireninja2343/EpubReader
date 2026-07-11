@@ -1,59 +1,14 @@
 // =================================================================
 // STRUCTURAL LOCAL BUNDLE GROUPINGS ENGINES
 // =================================================================
-function promptCreateGroup() {
-  const name = prompt(
-    "Enter target unique name configuration for your new reading group:",
-  );
-  if (!name) return;
-  const color = prompt(
-    "Enter hex code or HTML style keyword configuration for directory background color:",
-    "#252538",
-  );
-  if (!color) return;
-
-  const transaction = db.transaction([STORE_GROUPS], "readwrite");
-  const store = transaction.objectStore(STORE_GROUPS);
-  let newGroupId = null;
-  store.add({ name: name, backgroundColor: color }).onsuccess = (e) => {
-    newGroupId = e.target.result;
-  };
-  transaction.oncomplete = () => {
-    fetchLocalLibrary();
-    if (typeof pushGroupToCloud === "function") {
-      pushGroupToCloud({ id: newGroupId, name: name, backgroundColor: color });
-    }
-  };
-}
-
-function promptEditGroup(groupId, currentName, currentColor) {
-  const name = prompt(
-    "Modify Group Directory Reference Name String:",
-    currentName,
-  );
-  if (!name) return;
-  const color = prompt(
-    "Modify Group Background Style Sheet Color Keyword Mapping:",
-    currentColor,
-  );
-  if (!color) return;
-
-  const transaction = db.transaction([STORE_GROUPS], "readwrite");
-  const store = transaction.objectStore(STORE_GROUPS);
-  store.get(groupId).onsuccess = (e) => {
-    const record = e.target.result;
-    record.name = name;
-    record.backgroundColor = color;
-    store.put(record);
-  };
-  transaction.oncomplete = () => {
-    fetchLocalLibrary();
-    if (typeof pushGroupToCloud === "function") {
-      pushGroupToCloud({ id: groupId, name: name, backgroundColor: color });
-    }
-  };
-}
-
+/*
+ Note: this file used to also contain promptCreateGroup() and
+ promptEditGroup(), an older prompt()-based create/edit flow. Both were dead
+ code — fully superseded by the openGroupModal()/submitGroupModalForm() flow
+ below (wired up to the "New Group" button and each group card's "Edit"
+ button in index.html) and never called from anywhere. Removed to avoid two
+ diverging implementations of the same feature.
+*/
 function deleteGroup(groupId) {
   if (
     !confirm(

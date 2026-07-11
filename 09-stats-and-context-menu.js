@@ -115,13 +115,41 @@ function triggerContextAction(actionKey) {
     } else if (actionKey === 'metadata' || actionKey === 'stats') {
         openBookDiagnosticsModal(targetBookObj, actionKey);
     } else if (actionKey === 'group') {
-        const groupName = prompt("Enter Group ID Key or leave blank to clear group binding alignment values:");
+        /*
+         Previously this asked the user to type a raw numeric group ID,
+         which is an internal database key never shown anywhere in the UI —
+         there was no way for a user to actually know which number
+         corresponded to which group. This now lists the existing group
+         names (and their real IDs) so the prompt is actually answerable,
+         and validates the entered ID before using it.
+        */
+        if (loadedGroupsMemory.length === 0) {
+            alert("No groups exist yet. Create one first with \"📁 New Group\".");
+            return;
+        }
+        const optionsList = loadedGroupsMemory
+            .map((g) => `${g.id}: ${g.name}`)
+            .join("\n");
+        const groupIdInput = prompt(
+            `Enter a group ID to move "${targetBookObj.title}" into, or leave blank to remove it from its group:\n\n${optionsList}`,
+        );
+        if (groupIdInput === null) return; // user cancelled
+        let newGroupId = null;
+        if (groupIdInput.trim() !== "") {
+            const parsed = parseInt(groupIdInput, 10);
+            const matchesRealGroup = loadedGroupsMemory.some((g) => g.id === parsed);
+            if (!matchesRealGroup) {
+                alert("That's not a valid group ID.");
+                return;
+            }
+            newGroupId = parsed;
+        }
         const transaction = db.transaction([STORE_BOOKS], "readwrite");
         const store = transaction.objectStore(STORE_BOOKS);
         let updatedRecord = null;
         store.get(targetBookObj.id).onsuccess = (e) => {
             const r = e.target.result;
-            r.groupId = groupName ? parseInt(groupName) : null;
+            r.groupId = newGroupId;
             r.lastModified = new Date().getTime(); // Needed so the cloud/other devices know this copy is newer
             store.put(r);
             updatedRecord = r;
@@ -162,11 +190,11 @@ async function openBookDiagnosticsModal(bookObj, modeType) {
             const language = opfDoc.querySelector("language")?.textContent || "en";
 
             body.innerHTML = `
-                <div><strong>System Core Index:</strong> ${bookObj.id}</div>
-                <div><strong>Standard Manifest Title:</strong> ${metaTitle}</div>
-                <div><strong>Creator/Author Authority:</strong> ${creator}</div>
-                <div><strong>Language Code Element:</strong> ${language}</div>
-                <div><strong>Date Indexed Locally:</strong> ${new Date(bookObj.dateImported).toLocaleString()}</div>
+                <div><strong>System Core Index:</strong> ${escapeHtml(bookObj.id)}</div>
+                <div><strong>Standard Manifest Title:</strong> ${escapeHtml(metaTitle)}</div>
+                <div><strong>Creator/Author Authority:</strong> ${escapeHtml(creator)}</div>
+                <div><strong>Language Code Element:</strong> ${escapeHtml(language)}</div>
+                <div><strong>Date Indexed Locally:</strong> ${escapeHtml(new Date(bookObj.dateImported).toLocaleString())}</div>
             `;
         } else {
             // Read active spine configurations to parse total chapter volume metrics
@@ -240,7 +268,6 @@ async function showStatsViewState() {
     
     // Core calculation metrics
     let globalTotalPagesRead = 0;
-    let globalTotalWordsRead = 0;
 
     const tbody = document.getElementById("stats-books-table-body");
     tbody.innerHTML = `<tr><td colspan="4" style="padding:12px; text-align:center; color:var(--text-muted)">Analyzing book files...</td></tr>`;
@@ -299,6 +326,9 @@ async function showStatsViewState() {
 
         // --- CALCULATE PROGRESS & HEURISTICS ---
         let isRead = !!book.isRead;
+        // Was never incremented before, so "BOOKS FULLY READ" always showed 0
+        // regardless of how many books had actually been finished.
+        if (isRead) readBooksCount++;
 
         let pagesRead;
         let wordsRead;
@@ -317,14 +347,13 @@ async function showStatsViewState() {
         }
 
         globalTotalPagesRead += pagesRead;
-        globalTotalWordsRead += wordsRead;
 
         const mins = Math.round((book.timeSpentSeconds || 0) / 60);
 
         // Save row layout string reference
         rowTemplates.push(`
             <tr style="border-bottom: 1px solid var(--border);">
-                <td style="padding:12px;">${book.title}</td>
+                <td style="padding:12px;">${escapeHtml(book.title)}</td>
                 <td style="padding:12px; color:var(--accent);">${isRead ? '✅ Completed' : '📖 In Progress'}</td>
                 <td style="padding:12px;">${pagesRead} / ${totalPages} pages</td>
                 <td style="padding:12px;">${mins} minutes</td>

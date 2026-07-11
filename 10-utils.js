@@ -21,6 +21,22 @@ function convertBlobToBase64(blobItem) {
   });
 }
 
+// Escapes text pulled from untrusted sources (book titles/authors parsed out
+// of an uploaded .epub's own metadata) before it's interpolated into an
+// innerHTML template string. Without this, an .epub crafted with e.g.
+// <title>&lt;img src=x onerror=alert(1)&gt;</title> in its OPF metadata would
+// have that markup executed as real HTML wherever the title is displayed via
+// innerHTML (the book-metrics modal and the stats table).
+function escapeHtml(str) {
+  if (str === null || str === undefined) return "";
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 function base64ToBlob(base64) {
   const [header, data] = base64.split(",");
   const mime = header.match(/:(.*?);/)[1];

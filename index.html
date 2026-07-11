@@ -38,6 +38,9 @@
             <button id="btn-back-group" onclick="exitGroupView()">
                 ⬅️ Back to Groups
             </button>
+            <button id="btn-open-book" onclick="openSelectedBook()" style="display:none;">
+                📖 Open Selected
+            </button>
             <label for="epub-uploader" class="btn" id="upload-label">➕ Import EPUB</label>
             <input type="file" id="epub-uploader" accept=".epub"
              multiple onchange="handleFileImport(event)">
@@ -133,7 +136,7 @@
         <div id="reader-view" class="view-panel">
             <div id="toc-sidebar" class="reader-sidebar">
                 <div class="sidebar-heading">Table of Contents</div>
-                <button id="close-btn" onclick="toggleSidebar('toc-sidebar')">X</button>
+                <button id="close-btn-toc" class="sidebar-close-btn" onclick="toggleSidebar('toc-sidebar')">X</button>
                 <div id="toc-render-list"></div>
             </div>
 
@@ -142,7 +145,7 @@
             </div>
 
             <div id="settings-sidebar" class="reader-sidebar">
-                <button id="close-btn" onclick="toggleSidebar('settings-sidebar')">X</button>
+                <button id="close-btn-settings" class="sidebar-close-btn" onclick="toggleSidebar('settings-sidebar')">X</button>
                 <div class="sidebar-heading sidebar-heading-top">Library Interface</div>
                 <div class="control-item">
                     <label>Book Card Scale Dimension (<span id="lbl-card-size">160</span>px)</label>
@@ -209,6 +212,7 @@
         <div class="progress-bar-wrapper" id="progress-click-zone" onclick="handleProgressBarClick(event)">
             <div class="progress-line" id="progress-line-track">
                 <div class="progress-fill" id="progress-indicator-bar"></div>
+                <div id="chapter-segments-container"></div>
                 <div id="chapter-ticks-container"></div>
             </div>
         </div>

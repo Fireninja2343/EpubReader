@@ -26,17 +26,10 @@
    on purpose to keep background cost at zero.
  ================================================================= */
 
-const firebaseConfig = {
-  apiKey: "AIzaSyB-lHa5mHi-iMdgGaTe5ehFZE1Xf2T8TkQ",
-  authDomain: "epubreader-fire2343.firebaseapp.com",
-  projectId: "epubreader-fire2343",
-  storageBucket: "epubreader-fire2343.firebasestorage.app",
-  messagingSenderId: "171569428425",
-  appId: "1:171569428425:web:7e43e4deb49ab408cdda18",
-  measurementId: "G-QB21V0K0KP",
-};
-
-firebase.initializeApp(firebaseConfig);
+// Reuses the single copy of the config already defined in 00-config.js
+// instead of keeping a second, independently-hardcoded copy here that could
+// silently drift out of sync with it.
+firebase.initializeApp(Config.firebaseConfig);
 const fbAuth = firebase.auth();
 const fbDb = firebase.firestore();
 
@@ -60,6 +53,24 @@ let currentUser = null;
 let booksListenerUnsub = null;
 let groupsListenerUnsub = null;
 let initialSyncInProgress = false;
+
+/*
+ Generic per-key throttle used by pushGroupToCloud (and available for any
+ future caller that needs the same "at most once per
+ CLOUD_PROGRESS_PUSH_INTERVAL_MS" behavior already used for book progress
+ pushes in 02-db.js). Without this function existing, any call to
+ pushGroupToCloud() throws a ReferenceError and silently breaks group
+ creation/editing sync to the cloud.
+*/
+let lastThrottledCloudPush = {};
+function throttledCloudPush(key, pushFn) {
+  const now = Date.now();
+  const last = lastThrottledCloudPush[key] || 0;
+  if (now - last >= Config.Sync.CLOUD_PROGRESS_PUSH_INTERVAL_MS) {
+    lastThrottledCloudPush[key] = now;
+    pushFn();
+  }
+}
 
 /*
  Guards against re-running the entire sync setup every time Firebase

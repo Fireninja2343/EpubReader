@@ -14,6 +14,7 @@ function renderLibraryGrid() {
       const card = document.createElement("div");
       card.className = "group-card";
       card.style.backgroundColor = group.backgroundColor;
+      card.style.setProperty("--card-color", group.backgroundColor);
 
       card.addEventListener("dragover", (e) => e.preventDefault());
       card.addEventListener("drop", (e) => {
@@ -149,6 +150,7 @@ function buildBookCardsInLayout(booksScopingContextArray, targetDOMContainer) {
     if (book.cover) {
       const img = document.createElement("img");
       img.src = book.cover;
+      img.alt = book.title || "Book cover";
       coverWrap.appendChild(img);
     } else {
       const placeholder = document.createElement("div");
@@ -177,6 +179,16 @@ function openBookAndTrackLastRead(book) {
   }
 
   launchEpubReader(book);
+}
+
+// Opens whichever single book is currently selected via the grid's click
+// selection (as opposed to the double-click-to-open shortcut). Backs the
+// #btn-open-book button, which is only shown while exactly one book is
+// selected (see handleGridCardClick below).
+function openSelectedBook() {
+  if (selectedBookIds.length !== 1) return;
+  const book = loadedBooksMemory.find((b) => b.id === selectedBookIds[0]);
+  if (book) openBookAndTrackLastRead(book);
 }
 
 // Jumps straight into whichever book was most recently opened
