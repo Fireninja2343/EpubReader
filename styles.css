@@ -169,7 +169,12 @@ select {
 
 .book-card {
     background-color: var(--group-tint, var(--bg-card));
-    border: 1px solid var(--border);
+    border: 2px solid hsl(
+        from var(--group-tint)
+        h
+        calc(s*1.5)
+        calc(l*1.5)
+    );
     border-radius: 6px;
     padding: 10px;
     display: flex;
@@ -180,7 +185,12 @@ select {
 }
 
 .book-card:hover {
-    border-color: var(--text-muted);
+    border-color: 2px solid hsl(
+        from var(--group-tint)
+        h
+        calc(s*2)
+        calc(l*2)
+    );;
 }
 
 .book-card.selected {

@@ -129,7 +129,7 @@ function buildBookCardsInLayout(booksScopingContextArray, targetDOMContainer) {
     if (activeGroupFilterId !== null && activeGroupFilterColor) {
       card.style.setProperty(
         "--group-tint",
-        `color-mix(in srgb, ${activeGroupFilterColor} 15%, var(--bg-card))`,
+        `color-mix(in srgb, ${activeGroupFilterColor} 75%, var(--bg-card))`,
       );
     } else if (globalLibraryViewMode === "all" && book.groupId) {
       // In the flat "All Books" view there's no single active group to
@@ -139,7 +139,7 @@ function buildBookCardsInLayout(booksScopingContextArray, targetDOMContainer) {
       if (ownGroup && ownGroup.backgroundColor) {
         card.style.setProperty(
           "--group-tint",
-          `color-mix(in srgb, ${ownGroup.backgroundColor} 15%, var(--bg-card))`,
+          `color-mix(in srgb, ${ownGroup.backgroundColor} 50%, var(--bg-card))`,
         );
       }
     }
