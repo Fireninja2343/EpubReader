@@ -24,7 +24,7 @@ function renderLibraryGrid() {
 
       card.addEventListener("click", (e) => {
         if (e.detail === 2) {
-          enterGroupView(group.id, group.name);
+          enterGroupView(group.id, group.name, group.backgroundColor);
         }
       });
 

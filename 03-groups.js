@@ -44,10 +44,11 @@ function deleteGroup(groupId) {
   };
 }
 
-function enterGroupView(groupId, groupName) {
+function enterGroupView(groupId, groupName, colorVal = 'var(--bg-main)') {
+  document.getElementById("library-view").style.backgroundColor = colorVal;
+  document.getElementById("book-card").style.backgroundColor = "rgba(255, 255, 255, 0.05)"; 
   activeGroupFilterId = groupId;
-  document.getElementById("current-group-indicator").innerText =
-    `📂 [Group: ${groupName}]`;
+  document.getElementById("current-group-indicator").innerText = `📂 [Group: ${groupName}]`;
   document.getElementById("current-group-indicator").style.display = "inline";
   document.getElementById("btn-back-group").style.display = "inline-block";
   document.getElementById("library-view-mode").style.display = "none"; // Hide view toggle while inside a folder
@@ -55,6 +56,8 @@ function enterGroupView(groupId, groupName) {
 }
 
 function exitGroupView() {
+  document.getElementById("library-view").style.backgroundColor = 'var(--bg-main)';
+  document.getElementById("book-card").style.backgroundColor = 'var(--bg-card)';
   activeGroupFilterId = null;
   document.getElementById("current-group-indicator").style.display = "none";
   document.getElementById("btn-back-group").style.display = "none";
