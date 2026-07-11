@@ -125,6 +125,25 @@ function buildBookCardsInLayout(booksScopingContextArray, targetDOMContainer) {
     // REAL ID instead of index
     card.dataset.bookId = book.id;
 
+    // Tint book cards while browsing inside a group folder
+    if (activeGroupFilterId !== null && activeGroupFilterColor) {
+      card.style.setProperty(
+        "--group-tint",
+        `color-mix(in srgb, ${activeGroupFilterColor} 15%, var(--bg-card))`,
+      );
+    } else if (globalLibraryViewMode === "all" && book.groupId) {
+      // In the flat "All Books" view there's no single active group to
+      // borrow a color from (books from every group are mixed together),
+      // so look up each card's own group color individually.
+      const ownGroup = loadedGroupsMemory.find((g) => g.id === book.groupId);
+      if (ownGroup && ownGroup.backgroundColor) {
+        card.style.setProperty(
+          "--group-tint",
+          `color-mix(in srgb, ${ownGroup.backgroundColor} 15%, var(--bg-card))`,
+        );
+      }
+    }
+
     const dotsTrigger = document.createElement("div");
     dotsTrigger.className = "book-action-trigger-dots";
     dotsTrigger.innerText = "⋮";

@@ -44,21 +44,21 @@ function deleteGroup(groupId) {
   };
 }
 
-function enterGroupView(groupId, groupName, colorVal = 'var(--bg-main)') {
-  document.getElementById("library-view").style.backgroundColor = colorVal;
-  document.getElementById("book-card").style.backgroundColor = "rgba(255, 255, 255, 0.05)"; 
+function enterGroupView(groupId, groupName, colorVal = null) {
   activeGroupFilterId = groupId;
+  activeGroupFilterColor = colorVal;
+  document.getElementById("library-view").style.backgroundColor = colorVal ? `color-mix(in srgb, ${colorVal} 12%, var(--bg-main))` : "var(--bg-main)";
   document.getElementById("current-group-indicator").innerText = `📂 [Group: ${groupName}]`;
   document.getElementById("current-group-indicator").style.display = "inline";
   document.getElementById("btn-back-group").style.display = "inline-block";
   document.getElementById("library-view-mode").style.display = "none"; // Hide view toggle while inside a folder
-  renderLibraryGrid();
+  renderLibraryGrid(); // book-card tinting is applied inside buildBookCardsInLayout, reading activeGroupFilterColor
 }
 
 function exitGroupView() {
-  document.getElementById("library-view").style.backgroundColor = 'var(--bg-main)';
-  document.getElementById("book-card").style.backgroundColor = 'var(--bg-card)';
   activeGroupFilterId = null;
+  activeGroupFilterColor = null;
+  document.getElementById("library-view").style.backgroundColor = "var(--bg-main)";
   document.getElementById("current-group-indicator").style.display = "none";
   document.getElementById("btn-back-group").style.display = "none";
   document.getElementById("library-view-mode").style.display = "inline-block"; // Restore layout view selector controls

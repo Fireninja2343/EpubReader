@@ -21,6 +21,7 @@ let lastPushedChapterIndex = null; // Tracks the last chapter index that was pus
 let lastSelectedBookId = null;
 let overscrollCounter = 0;
 let activeGroupFilterId = null; // null represents Global View mode entries pipeline
+let activeGroupFilterColor = null; // The backgroundColor of whichever group is currently being viewed
 
 let globalLibraryViewMode = "grouped"; // Matches selector defaults tracking profiles
 

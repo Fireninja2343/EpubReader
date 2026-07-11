@@ -168,7 +168,7 @@ select {
 }
 
 .book-card {
-    background-color: var(--bg-card);
+    background-color: var(--group-tint, var(--bg-card));
     border: 1px solid var(--border);
     border-radius: 6px;
     padding: 10px;
