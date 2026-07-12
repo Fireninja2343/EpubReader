@@ -1086,16 +1086,16 @@ footer {
     align-items: flex-start;
 }
 
-.note-group-filter-row {
+.note-tag-filter-row {
     display: flex;
     flex-wrap: wrap;
     gap: 10px;
 }
 
-/* Each filter checkbox gets a small colored dot borrowed from its group's own
-   color via --group-tint, so the filter row doubles as a color legend for
+/* Each filter checkbox gets a small colored dot borrowed from its tag's own
+   color via --tag-tint, so the filter row doubles as a color legend for
    the sections rendered below it. */
-.note-group-filter-chip {
+.note-tag-filter-chip {
     display: flex;
     align-items: center;
     gap: 6px;
@@ -1107,13 +1107,13 @@ footer {
     cursor: pointer;
 }
 
-.note-group-filter-chip::before {
+.note-tag-filter-chip::before {
     content: "";
     display: block;
     width: 10px;
     height: 10px;
     border-radius: 50%;
-    background-color: var(--group-tint, var(--text-muted));
+    background-color: var(--tag-tint, var(--text-muted));
 }
 
 .notes-list-container {
@@ -1129,15 +1129,15 @@ footer {
     padding: 30px 10px;
 }
 
-.note-group-section {
-    border-left: 3px solid var(--group-tint, var(--border));
+.note-tag-section {
+    border-left: 3px solid var(--tag-tint, var(--border));
     padding-left: 15px;
 }
 
-.note-group-section-heading {
+.note-tag-section-heading {
     font-size: 15px;
     font-weight: 700;
-    color: var(--group-tint, var(--text-main));
+    color: var(--tag-tint, var(--text-main));
     margin-bottom: 12px;
 }
 
@@ -1156,6 +1156,10 @@ footer {
     display: flex;
     flex-direction: column;
     gap: 8px;
+    /* min-width: 0 lets this grid item actually shrink to its column's
+       track width instead of being forced wider by unbreakable content
+       inside it (see the overflow-wrap rules on the quote/comment below). */
+    min-width: 0;
 }
 
 .note-card-actions-trigger {
@@ -1182,10 +1186,30 @@ footer {
     color: var(--accent);
 }
 
-.note-card-book-tag {
+/* Row of tag pills at the top of a note card - the automatic book tag (if
+   any) always renders first, followed by any manually-assigned tags. */
+.note-card-tags-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding-right: 28px; /* keep clear of the ⋮ actions trigger */
+}
+
+.note-card-tag-pill {
+    display: inline-block;
     font-size: 11px;
-    color: var(--text-muted);
-    padding-right: 28px;
+    line-height: 1.4;
+    padding: 2px 8px;
+    border-radius: 10px;
+    background-color: color-mix(in srgb, var(--tag-tint, var(--text-muted)) 20%, var(--bg-sidebar));
+    color: var(--tag-tint, var(--text-muted));
+    border: 1px solid color-mix(in srgb, var(--tag-tint, var(--text-muted)) 45%, transparent);
+    max-width: 100%;
+    overflow-wrap: break-word;
+}
+
+.note-card-book-tag {
+    font-weight: 600;
 }
 
 .note-card-quote {
@@ -1194,12 +1218,21 @@ footer {
     border-left: 2px solid var(--accent);
     padding-left: 10px;
     color: var(--text-main);
+    /* A single very long "word" (a URL, a run-on token, etc.) would
+       otherwise overflow straight out of the card instead of wrapping like
+       normal space-separated text does. */
+    overflow-wrap: break-word;
+    word-break: break-word;
+    min-width: 0;
 }
 
 .note-card-comment {
     font-size: 13px;
     color: var(--text-muted);
     font-style: italic;
+    overflow-wrap: break-word;
+    word-break: break-word;
+    min-width: 0;
 }
 
 /* --- Note editor modal --- */
@@ -1219,8 +1252,33 @@ footer {
     min-height: 50px;
 }
 
-/* --- Manage note groups modal --- */
-.note-group-manage-list {
+/* Multi-select checkbox list used both in the full note editor and the
+   quick "Move Note (Tag)" picker - lets a note carry any number of tags
+   instead of being limited to a single dropdown selection. */
+.note-editor-tag-checkboxes {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    max-height: 160px;
+    overflow-y: auto;
+    padding: 4px 0;
+}
+
+.note-editor-tag-checkbox-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background-color: var(--bg-card);
+    border: 1px solid color-mix(in srgb, var(--tag-tint, var(--border)) 55%, var(--border));
+    border-radius: 20px;
+    padding: 5px 12px 5px 8px;
+    font-size: 12.5px;
+    cursor: pointer;
+    color: var(--tag-tint, var(--text-main));
+}
+
+/* --- Manage note tags modal --- */
+.note-tag-manage-list {
     display: flex;
     flex-direction: column;
     gap: 10px;
@@ -1229,18 +1287,18 @@ footer {
     margin-bottom: 15px;
 }
 
-.note-group-manage-row {
+.note-tag-manage-row {
     display: flex;
     align-items: center;
     gap: 10px;
 }
 
-.note-group-manage-delete-btn {
+.note-tag-manage-delete-btn {
     font-size: 16px;
     font-weight: bold;
 }
 
-.note-group-add-btn {
+.note-tag-add-btn {
     width: 100%;
 }
 

@@ -3,11 +3,18 @@
  NOTES MODULE
  A note is either created from text the user selects while reading (its
  bookId/bookTitle are recorded so the note stays traceable even if the book
- is later deleted) or created manually from the Notes page with no book
- attached at all. Notes belong to an optional "note group" - a separate
- concept from the book library's folder groups in 03-groups.js, since a
- note's grouping (e.g. by theme) has nothing to do with which book folder
- it came from.
+ is later deleted) or created manually from the Notes page, optionally with
+ a book chosen from a <select> of the current library.
+
+ Organization is by TAGS rather than a single group: a note can carry any
+ number of manually-assigned tags (stored in note.tagIds, referencing rows
+ in the STORE_NOTE_GROUPS store - the store name/schema is unchanged, only
+ the user-facing concept is now "tags" instead of a single "group"). On top
+ of those manual tags, any note that originated from (or was manually
+ linked to) a book automatically gets a special "book tag" - this is never
+ stored as its own row, it's derived at render time from note.bookId /
+ note.bookTitle plus that book's current group color, so it can't drift out
+ of sync and never needs a "None" placeholder when there isn't one.
 
  Like the rest of the app, IndexedDB is the source of truth here; this
  module doesn't push notes to Firebase, so they stay local-only for now.
@@ -15,21 +22,24 @@
 */
 
 let loadedNotesMemory = [];
-let loadedNoteGroupsMemory = [];
+let loadedNoteTagsMemory = [];
 
 /*
- Keys the user has explicitly hidden via the group filter checkboxes on the
+ Keys the user has explicitly hidden via the tag filter checkboxes on the
  Notes page. An empty set means "show everything" - this is deliberately
- the inverse of a "visible" set so that newly created groups show up
- checked/visible by default without any extra bookkeeping. "none" is the
- reserved key for the ungrouped bucket.
+ the inverse of a "visible" set so that newly created tags show up
+ checked/visible by default without any extra bookkeeping.
+ "none" is the reserved key for the untagged bucket. Book auto-tags use the
+ key `book:<bookId>` so they can't collide with real tag ids.
 */
-let hiddenNoteGroupKeys = new Set();
+let hiddenNoteTagKeys = new Set();
 
 let noteSelectionButton = null;
 let noteEditorBookContext = { bookId: null, bookTitle: null };
+let noteEditorEditingNoteId = null; // null while creating; set to a note id while editing that note
+let noteTagPickerNoteId = null; // which note "Move Note (Tag)" is currently acting on
 
-const LAST_NOTE_GROUP_STORAGE_KEY = "EpubReader_LastNoteGroupId_v1";
+const LAST_NOTE_TAGS_STORAGE_KEY = "EpubReader_LastNoteTagIds_v1";
 
 // -----------------------------------------------------------------
 // DATABASE LOAD / REFRESH
@@ -38,30 +48,30 @@ function fetchNotesLibrary() {
   if (!db) return;
   const transaction = db.transaction([STORE_NOTES, STORE_NOTE_GROUPS], "readonly");
   const notesStore = transaction.objectStore(STORE_NOTES);
-  const noteGroupsStore = transaction.objectStore(STORE_NOTE_GROUPS);
+  const noteTagsStore = transaction.objectStore(STORE_NOTE_GROUPS);
 
   notesStore.getAll().onsuccess = (e) => {
     loadedNotesMemory = e.target.result;
   };
-  noteGroupsStore.getAll().onsuccess = (e) => {
-    loadedNoteGroupsMemory = e.target.result;
+  noteTagsStore.getAll().onsuccess = (e) => {
+    loadedNoteTagsMemory = e.target.result;
   };
   transaction.oncomplete = () => {
     renderNotesPageIfOpen();
   };
 }
 
-// Re-renders the Notes page and/or the group-management list only if
-// they're actually visible right now, so a background note-group edit
+// Re-renders the Notes page and/or the tag-management list only if
+// they're actually visible right now, so a background note-tag edit
 // doesn't do pointless DOM work while the user is reading or in the library.
 function renderNotesPageIfOpen() {
   const notesView = document.getElementById("notes-view");
   if (notesView && notesView.style.display === "flex") {
     renderNotesPage();
   }
-  const manageModal = document.getElementById("note-group-manage-modal");
+  const manageModal = document.getElementById("note-tag-manage-modal");
   if (manageModal && manageModal.open) {
-    renderNoteGroupManageList();
+    renderNoteTagManageList();
   }
 }
 
@@ -146,42 +156,97 @@ document.addEventListener("mousedown", (e) => {
 });
 
 // -----------------------------------------------------------------
-// NOTE EDITOR MODAL (shared by the selection flow and manual creation)
+// NOTE EDITOR MODAL (shared by the selection flow, manual creation, and
+// editing an existing note)
 // -----------------------------------------------------------------
 function openManualNoteCreationModal() {
-  // Manual creation always defaults its group to "None", regardless of
-  // whatever group was last used from the in-reader selection flow.
-  openNoteEditorModal({ selectedText: "", bookId: null, bookTitle: null, defaultGroupId: null });
+  // Manual creation always defaults to no book and no tags, regardless of
+  // whatever was last used from the in-reader selection flow.
+  openNoteEditorModal({ selectedText: "", bookId: null, bookTitle: null, tagIds: [] });
 }
 
-function openNoteEditorModal({ selectedText = "", bookId = null, bookTitle = null, defaultGroupId } = {}) {
+function openNoteEditorModal({
+  selectedText = "",
+  comment = "",
+  bookId = null,
+  bookTitle = null,
+  tagIds,
+  editingNoteId = null,
+} = {}) {
+  noteEditorEditingNoteId = editingNoteId;
   noteEditorBookContext = { bookId, bookTitle };
 
+  document.getElementById("note-editor-modal-heading").innerText =
+    editingNoteId ? "Edit Note" : "Add Note";
+
   document.getElementById("note-editor-text-input").value = selectedText;
-  document.getElementById("note-editor-comment-input").value = "";
+  document.getElementById("note-editor-comment-input").value = comment;
 
-  const groupSelect = document.getElementById("note-editor-group-select");
-  populateNoteGroupSelect(groupSelect);
+  const bookSelect = document.getElementById("note-editor-book-select");
+  populateNoteEditorBookSelect(bookSelect, bookId);
 
-  const resolvedDefault = defaultGroupId !== undefined ? defaultGroupId : loadLastUsedNoteGroupId();
-  groupSelect.value = resolvedDefault != null ? String(resolvedDefault) : "";
+  const resolvedTagIds = tagIds !== undefined ? tagIds : loadLastUsedNoteTagIds();
+  const tagContainer = document.getElementById("note-editor-tags-container");
+  populateNoteEditorTagCheckboxes(tagContainer, resolvedTagIds || []);
 
   document.getElementById("note-editor-modal").showModal();
 }
 
-function populateNoteGroupSelect(selectEl) {
+// Lists every book currently in the library so a manually-created note can
+// be linked to one (or left as "None"). Book-originated notes get the
+// originating book preselected here too, but the field stays editable.
+function populateNoteEditorBookSelect(selectEl, selectedBookId) {
   selectEl.innerHTML = "";
   const noneOption = document.createElement("option");
   noneOption.value = "";
   noneOption.innerText = "None";
   selectEl.appendChild(noneOption);
 
-  loadedNoteGroupsMemory.forEach((group) => {
+  loadedBooksMemory.forEach((book) => {
     const opt = document.createElement("option");
-    opt.value = String(group.id);
-    opt.innerText = group.name;
+    opt.value = String(book.id);
+    opt.innerText = book.title;
     selectEl.appendChild(opt);
   });
+
+  selectEl.value = selectedBookId != null ? String(selectedBookId) : "";
+}
+
+// Multi-select checkbox list of the real (non-book) tags, so a note can
+// carry any number of them at once instead of being limited to one.
+function populateNoteEditorTagCheckboxes(containerEl, selectedTagIds) {
+  containerEl.innerHTML = "";
+
+  if (loadedNoteTagsMemory.length === 0) {
+    containerEl.innerHTML = `<div class="hint-text">No tags yet - create one from "🏷️ Manage Tags".</div>`;
+    return;
+  }
+
+  const selectedSet = new Set((selectedTagIds || []).map(Number));
+
+  loadedNoteTagsMemory.forEach((tag) => {
+    const item = document.createElement("label");
+    item.className = "note-editor-tag-checkbox-item";
+    item.style.setProperty("--tag-tint", tag.color || "");
+
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.value = String(tag.id);
+    checkbox.checked = selectedSet.has(tag.id);
+
+    const span = document.createElement("span");
+    span.innerText = tag.name;
+
+    item.appendChild(checkbox);
+    item.appendChild(span);
+    containerEl.appendChild(item);
+  });
+}
+
+function readCheckedTagIdsFrom(containerEl) {
+  return Array.from(containerEl.querySelectorAll("input[type='checkbox']:checked")).map((cb) =>
+    parseInt(cb.value, 10),
+  );
 }
 
 function closeNoteEditorModal() {
@@ -196,69 +261,119 @@ function submitNoteEditorForm() {
   }
 
   const comment = document.getElementById("note-editor-comment-input").value.trim();
-  const groupSelectValue = document.getElementById("note-editor-group-select").value;
-  const groupId = groupSelectValue ? parseInt(groupSelectValue, 10) : null;
+
+  const bookSelectValue = document.getElementById("note-editor-book-select").value;
+  const bookId = bookSelectValue ? parseInt(bookSelectValue, 10) : null;
+  const linkedBook = bookId != null ? loadedBooksMemory.find((b) => b.id === bookId) : null;
+  // Falls back to whatever book title the note already carried (e.g. when
+  // editing a book-originated note whose book has since been deleted and
+  // so no longer appears in the <select>) rather than wiping it out.
+  const bookTitle = linkedBook ? linkedBook.title : (bookId != null ? noteEditorBookContext.bookTitle : null);
+
+  const tagIds = readCheckedTagIdsFrom(document.getElementById("note-editor-tags-container"));
+
+  if (noteEditorEditingNoteId != null) {
+    updateNoteFields(noteEditorEditingNoteId, {
+      selectedText: text,
+      comment,
+      bookId,
+      bookTitle,
+      tagIds,
+    });
+    saveLastUsedNoteTagIds(tagIds);
+    closeNoteEditorModal();
+    return;
+  }
 
   const entry = {
     selectedText: text,
     comment: comment,
-    groupId: groupId,
-    bookId: noteEditorBookContext.bookId,
-    bookTitle: noteEditorBookContext.bookTitle,
+    tagIds: tagIds,
+    bookId: bookId,
+    bookTitle: bookTitle,
     dateCreated: Date.now(),
   };
 
   const transaction = db.transaction([STORE_NOTES], "readwrite");
   transaction.objectStore(STORE_NOTES).add(entry);
   transaction.oncomplete = () => {
-    saveLastUsedNoteGroupId(groupId);
+    saveLastUsedNoteTagIds(tagIds);
     closeNoteEditorModal();
     fetchNotesLibrary();
   };
 }
 
-function loadLastUsedNoteGroupId() {
-  const raw = localStorage.getItem(LAST_NOTE_GROUP_STORAGE_KEY);
-  if (!raw) return null;
-  const parsed = parseInt(raw, 10);
-  return Number.isNaN(parsed) ? null : parsed;
+function loadLastUsedNoteTagIds() {
+  const raw = localStorage.getItem(LAST_NOTE_TAGS_STORAGE_KEY);
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((n) => Number.isInteger(n)) : [];
+  } catch (e) {
+    return [];
+  }
 }
 
-function saveLastUsedNoteGroupId(groupId) {
-  localStorage.setItem(LAST_NOTE_GROUP_STORAGE_KEY, groupId == null ? "" : String(groupId));
+function saveLastUsedNoteTagIds(tagIds) {
+  localStorage.setItem(LAST_NOTE_TAGS_STORAGE_KEY, JSON.stringify(tagIds || []));
 }
 
 // -----------------------------------------------------------------
-// NOTES PAGE: GROUP FILTER CHECKBOXES + GROUPED NOTE LIST
+// NOTES PAGE: TAG FILTER CHIPS + TAG-SECTIONED NOTE LIST
 // -----------------------------------------------------------------
 function renderNotesPage() {
-  renderNoteGroupFilterCheckboxes();
+  renderNoteTagFilterRow();
   renderNotesList();
 }
 
-function renderNoteGroupFilterCheckboxes() {
-  const container = document.getElementById("note-group-filter-row");
+// Every distinct book referenced by any current note gets its own
+// (derived, not stored) auto-tag descriptor: {key, name, color}.
+function collectBookAutoTags() {
+  const byKey = new Map();
+  loadedNotesMemory.forEach((note) => {
+    if (note.bookId == null) return;
+    const key = `book:${note.bookId}`;
+    if (byKey.has(key)) return;
+    const liveBook = loadedBooksMemory.find((b) => b.id === note.bookId);
+    const liveGroup = liveBook && liveBook.groupId != null
+      ? loadedGroupsMemory.find((g) => g.id === liveBook.groupId)
+      : null;
+    byKey.set(key, {
+      key,
+      name: (liveBook && liveBook.title) || note.bookTitle || "Unknown Book",
+      color: liveGroup ? liveGroup.backgroundColor : null,
+      isBookTag: true,
+    });
+  });
+  return Array.from(byKey.values());
+}
+
+function renderNoteTagFilterRow() {
+  const container = document.getElementById("note-tag-filter-row");
   container.innerHTML = "";
 
-  container.appendChild(buildNoteGroupFilterCheckbox("none", "No Group", null));
-  loadedNoteGroupsMemory.forEach((group) => {
-    container.appendChild(buildNoteGroupFilterCheckbox(group.id, group.name, group.color));
+  container.appendChild(buildNoteTagFilterChip("none", "Untagged", null));
+  loadedNoteTagsMemory.forEach((tag) => {
+    container.appendChild(buildNoteTagFilterChip(tag.id, tag.name, tag.color));
+  });
+  collectBookAutoTags().forEach((bookTag) => {
+    container.appendChild(buildNoteTagFilterChip(bookTag.key, `📖 ${bookTag.name}`, bookTag.color));
   });
 }
 
-function buildNoteGroupFilterCheckbox(key, labelText, color) {
+function buildNoteTagFilterChip(key, labelText, color) {
   const label = document.createElement("label");
-  label.className = "note-group-filter-chip";
-  if (color) label.style.setProperty("--group-tint", color);
+  label.className = "note-tag-filter-chip";
+  if (color) label.style.setProperty("--tag-tint", color);
 
   const checkbox = document.createElement("input");
   checkbox.type = "checkbox";
-  checkbox.checked = !hiddenNoteGroupKeys.has(key);
+  checkbox.checked = !hiddenNoteTagKeys.has(key);
   checkbox.onchange = () => {
     if (checkbox.checked) {
-      hiddenNoteGroupKeys.delete(key);
+      hiddenNoteTagKeys.delete(key);
     } else {
-      hiddenNoteGroupKeys.add(key);
+      hiddenNoteTagKeys.add(key);
     }
     renderNotesList();
   };
@@ -271,6 +386,15 @@ function buildNoteGroupFilterCheckbox(key, labelText, color) {
   return label;
 }
 
+// Returns every tag key that applies to a note: its manual tagIds, plus its
+// derived book auto-tag key if it has a linked book. A note with neither
+// falls into the "none" (untagged) bucket.
+function keysForNote(note) {
+  const keys = (note.tagIds || []).slice();
+  if (note.bookId != null) keys.push(`book:${note.bookId}`);
+  return keys.length ? keys : ["none"];
+}
+
 function renderNotesList() {
   const container = document.getElementById("notes-list-container");
   container.innerHTML = "";
@@ -280,41 +404,46 @@ function renderNotesList() {
     return;
   }
 
-  // One bucket per real note group, plus a trailing "No Group" catch-all -
-  // that catch-all is also where a note lands if its group was since deleted.
-  const sections = loadedNoteGroupsMemory.map((g) => ({
-    key: g.id,
-    name: g.name,
-    color: g.color,
+  // One section per real tag, one per distinct book auto-tag, plus a
+  // trailing "Untagged" catch-all. A note with several tags appears in
+  // every section it belongs to.
+  const sections = loadedNoteTagsMemory.map((t) => ({
+    key: t.id,
+    name: t.name,
+    color: t.color,
     notes: [],
   }));
-  sections.push({ key: "none", name: "No Group", color: null, notes: [] });
+  collectBookAutoTags().forEach((bookTag) => {
+    sections.push({ key: bookTag.key, name: `📖 ${bookTag.name}`, color: bookTag.color, notes: [] });
+  });
+  sections.push({ key: "none", name: "Untagged", color: null, notes: [] });
 
   loadedNotesMemory.forEach((note) => {
-    const key = note.groupId == null ? "none" : note.groupId;
-    const section = sections.find((s) => s.key === key) || sections.find((s) => s.key === "none");
-    section.notes.push(note);
+    keysForNote(note).forEach((key) => {
+      const section = sections.find((s) => s.key === key);
+      if (section) section.notes.push(note);
+    });
   });
 
   let renderedAnything = false;
   sections.forEach((section) => {
-    if (hiddenNoteGroupKeys.has(section.key) || section.notes.length === 0) return;
+    if (hiddenNoteTagKeys.has(section.key) || section.notes.length === 0) return;
     renderedAnything = true;
-    container.appendChild(buildNoteGroupSection(section));
+    container.appendChild(buildNoteTagSection(section));
   });
 
   if (!renderedAnything) {
-    container.innerHTML = `<div class="notes-empty-state">No notes match the current group filters.</div>`;
+    container.innerHTML = `<div class="notes-empty-state">No notes match the current tag filters.</div>`;
   }
 }
 
-function buildNoteGroupSection(section) {
+function buildNoteTagSection(section) {
   const wrapper = document.createElement("div");
-  wrapper.className = "note-group-section";
-  if (section.color) wrapper.style.setProperty("--group-tint", section.color);
+  wrapper.className = "note-tag-section";
+  if (section.color) wrapper.style.setProperty("--tag-tint", section.color);
 
   const heading = document.createElement("div");
-  heading.className = "note-group-section-heading";
+  heading.className = "note-tag-section-heading";
   heading.innerText = section.name;
   wrapper.appendChild(heading);
 
@@ -340,11 +469,36 @@ function buildNoteCard(note) {
   actionsTrigger.onclick = (e) => toggleNoteContextMenuFlyout(e, note.id);
   card.appendChild(actionsTrigger);
 
-  if (note.bookTitle) {
-    const bookTag = document.createElement("div");
-    bookTag.className = "note-card-book-tag";
-    bookTag.innerText = `📖 ${note.bookTitle}`;
-    card.appendChild(bookTag);
+  const hasBookTag = note.bookId != null;
+  const hasManualTags = (note.tagIds || []).length > 0;
+
+  if (hasBookTag || hasManualTags) {
+    const tagsRow = document.createElement("div");
+    tagsRow.className = "note-card-tags-row";
+
+    if (hasBookTag) {
+      const liveBook = loadedBooksMemory.find((b) => b.id === note.bookId);
+      const liveGroup = liveBook && liveBook.groupId != null
+        ? loadedGroupsMemory.find((g) => g.id === liveBook.groupId)
+        : null;
+      const bookPill = document.createElement("span");
+      bookPill.className = "note-card-tag-pill note-card-book-tag";
+      if (liveGroup) bookPill.style.setProperty("--tag-tint", liveGroup.backgroundColor);
+      bookPill.innerText = `📖 ${(liveBook && liveBook.title) || note.bookTitle}`;
+      tagsRow.appendChild(bookPill);
+    }
+
+    (note.tagIds || []).forEach((tagId) => {
+      const tag = loadedNoteTagsMemory.find((t) => t.id === tagId);
+      if (!tag) return;
+      const pill = document.createElement("span");
+      pill.className = "note-card-tag-pill";
+      pill.style.setProperty("--tag-tint", tag.color || "");
+      pill.innerText = tag.name;
+      tagsRow.appendChild(pill);
+    });
+
+    card.appendChild(tagsRow);
   }
 
   // innerText (not innerHTML) throughout this card, same reasoning as
@@ -376,8 +530,10 @@ function deleteNote(noteId) {
 // -----------------------------------------------------------------
 // PER-NOTE 3-DOTS ACTIONS FLYOUT
 // Mirrors the book-context-menu pattern in 09-stats-and-context-menu.js:
-// one shared floating menu, positioned at the click, that acts on whichever
-// note's trigger was last clicked.
+// one shared floating menu, positioned relative to whichever trigger button
+// was clicked (auto-flipping to stay within the viewport, see
+// positionFlyoutMenu in 10-utils.js), that acts on whichever note's
+// trigger was last clicked.
 // -----------------------------------------------------------------
 let currentActiveContextNoteId = null;
 
@@ -388,9 +544,7 @@ function toggleNoteContextMenuFlyout(event, noteId) {
   currentActiveContextNoteId = noteId;
   const menu = document.getElementById("note-context-menu");
 
-  menu.style.display = "block";
-  menu.style.left = `${event.clientX + window.scrollX}px`;
-  menu.style.top = `${event.clientY + window.scrollY}px`;
+  positionFlyoutMenu(menu, event);
 
   document.addEventListener("click", closeNoteContextMenuFlyoutOnceOutside);
 }
@@ -407,54 +561,21 @@ function triggerNoteContextAction(actionKey) {
 
   if (actionKey === "delete") {
     deleteNote(targetNote.id);
-  } else if (actionKey === "editText") {
-    const updated = prompt("Edit note text:", targetNote.selectedText);
-    if (updated === null) return; // user cancelled
-    const trimmed = updated.trim();
-    if (!trimmed) {
-      alert("Note text can't be empty.");
-      return;
-    }
-    updateNoteFields(targetNote.id, { selectedText: trimmed });
-  } else if (actionKey === "editComment") {
-    const updated = prompt("Edit comment:", targetNote.comment || "");
-    if (updated === null) return; // user cancelled
-    updateNoteFields(targetNote.id, { comment: updated.trim() });
-  } else if (actionKey === "editGroup") {
-    /*
-     Same reasoning as the book library's "Manage Group" action in
-     09-stats-and-context-menu.js: list the real group names/IDs so the
-     prompt is actually answerable instead of asking for a raw DB key
-     the user has no way of knowing.
-    */
-    if (loadedNoteGroupsMemory.length === 0) {
-      alert('No note groups exist yet. Create one first with "🎨 Manage Groups".');
-      return;
-    }
-    const optionsList = loadedNoteGroupsMemory
-      .map((g) => `${g.id}: ${g.name}`)
-      .join("\n");
-    const currentValue = targetNote.groupId != null ? String(targetNote.groupId) : "";
-    const groupIdInput = prompt(
-      `Enter a group ID to move this note into, or leave blank to remove it from its group:\n\n${optionsList}`,
-      currentValue,
-    );
-    if (groupIdInput === null) return; // user cancelled
-    let newGroupId = null;
-    if (groupIdInput.trim() !== "") {
-      const parsed = parseInt(groupIdInput, 10);
-      const matchesRealGroup = loadedNoteGroupsMemory.some((g) => g.id === parsed);
-      if (!matchesRealGroup) {
-        alert("That's not a valid group ID.");
-        return;
-      }
-      newGroupId = parsed;
-    }
-    updateNoteFields(targetNote.id, { groupId: newGroupId });
+  } else if (actionKey === "edit") {
+    openNoteEditorModal({
+      selectedText: targetNote.selectedText,
+      comment: targetNote.comment || "",
+      bookId: targetNote.bookId,
+      bookTitle: targetNote.bookTitle,
+      tagIds: targetNote.tagIds || [],
+      editingNoteId: targetNote.id,
+    });
+  } else if (actionKey === "moveTags") {
+    openNoteTagPickerModal(targetNote);
   }
 }
 
-// Shared write-path for the single-field edits above
+// Shared write-path for field edits
 function updateNoteFields(noteId, changes) {
   const transaction = db.transaction([STORE_NOTES], "readwrite");
   const store = transaction.objectStore(STORE_NOTES);
@@ -469,56 +590,81 @@ function updateNoteFields(noteId, changes) {
 }
 
 // -----------------------------------------------------------------
-// NOTE GROUP MANAGEMENT
+// "MOVE NOTE (TAG)" - lightweight tag-only picker
+// A quicker path than the full editor for the common case of just
+// re-tagging a note; only touches note.tagIds and never the automatic book
+// tag, which is never user-editable directly.
 // -----------------------------------------------------------------
-function openNoteGroupManageModal() {
-  renderNoteGroupManageList();
-  document.getElementById("note-group-manage-modal").showModal();
+function openNoteTagPickerModal(note) {
+  noteTagPickerNoteId = note.id;
+  const container = document.getElementById("note-tag-picker-container");
+  populateNoteEditorTagCheckboxes(container, note.tagIds || []);
+  document.getElementById("note-tag-picker-modal").showModal();
 }
 
-function closeNoteGroupManageModal() {
-  document.getElementById("note-group-manage-modal").close();
+function closeNoteTagPickerModal() {
+  document.getElementById("note-tag-picker-modal").close();
+}
+
+function submitNoteTagPickerForm() {
+  if (noteTagPickerNoteId == null) return;
+  const tagIds = readCheckedTagIdsFrom(document.getElementById("note-tag-picker-container"));
+  updateNoteFields(noteTagPickerNoteId, { tagIds });
+  saveLastUsedNoteTagIds(tagIds);
+  closeNoteTagPickerModal();
+}
+
+// -----------------------------------------------------------------
+// NOTE TAG MANAGEMENT
+// -----------------------------------------------------------------
+function openNoteTagManageModal() {
+  renderNoteTagManageList();
+  document.getElementById("note-tag-manage-modal").showModal();
+}
+
+function closeNoteTagManageModal() {
+  document.getElementById("note-tag-manage-modal").close();
   // Reflect any renames, recolors, or deletions on the page underneath immediately.
   renderNotesPage();
 }
 
-function renderNoteGroupManageList() {
-  const list = document.getElementById("note-group-manage-list");
+function renderNoteTagManageList() {
+  const list = document.getElementById("note-tag-manage-list");
   list.innerHTML = "";
 
-  if (loadedNoteGroupsMemory.length === 0) {
-    list.innerHTML = `<div class="notes-empty-state">No note groups yet.</div>`;
+  if (loadedNoteTagsMemory.length === 0) {
+    list.innerHTML = `<div class="notes-empty-state">No tags yet.</div>`;
   }
 
-  loadedNoteGroupsMemory.forEach((group) => {
+  loadedNoteTagsMemory.forEach((tag) => {
     const row = document.createElement("div");
-    row.className = "note-group-manage-row";
+    row.className = "note-tag-manage-row";
 
     const colorInput = document.createElement("input");
     colorInput.type = "color";
     colorInput.className = "color-swatch-input";
-    colorInput.value = group.color || "#808080";
-    colorInput.onchange = () => updateNoteGroup(group.id, { color: colorInput.value });
+    colorInput.value = tag.color || "#808080";
+    colorInput.onchange = () => updateNoteTag(tag.id, { color: colorInput.value });
 
     const nameInput = document.createElement("input");
     nameInput.type = "text";
     nameInput.className = "full-width-input";
-    nameInput.value = group.name;
+    nameInput.value = tag.name;
     nameInput.onchange = () => {
       const trimmed = nameInput.value.trim();
       if (!trimmed) {
-        alert("Group name can't be empty.");
-        nameInput.value = group.name;
+        alert("Tag name can't be empty.");
+        nameInput.value = tag.name;
         return;
       }
-      updateNoteGroup(group.id, { name: trimmed });
+      updateNoteTag(tag.id, { name: trimmed });
     };
 
     const deleteBtn = document.createElement("button");
-    deleteBtn.className = "group-mini-btn note-group-manage-delete-btn";
+    deleteBtn.className = "group-mini-btn note-tag-manage-delete-btn";
     deleteBtn.innerText = "-";
-    deleteBtn.title = "Delete group";
-    deleteBtn.onclick = () => deleteNoteGroup(group.id);
+    deleteBtn.title = "Delete tag";
+    deleteBtn.onclick = () => deleteNoteTag(tag.id);
 
     row.appendChild(colorInput);
     row.appendChild(nameInput);
@@ -527,10 +673,10 @@ function renderNoteGroupManageList() {
   });
 }
 
-function updateNoteGroup(groupId, changes) {
+function updateNoteTag(tagId, changes) {
   const transaction = db.transaction([STORE_NOTE_GROUPS], "readwrite");
   const store = transaction.objectStore(STORE_NOTE_GROUPS);
-  store.get(groupId).onsuccess = (e) => {
+  store.get(tagId).onsuccess = (e) => {
     const record = e.target.result;
     if (record) {
       Object.assign(record, changes);
@@ -540,9 +686,9 @@ function updateNoteGroup(groupId, changes) {
   transaction.oncomplete = () => fetchNotesLibrary();
 }
 
-function createNoteGroup() {
+function createNoteTag() {
   /*
-   New groups are inserted immediately with a placeholder name and a random
+   New tags are inserted immediately with a placeholder name and a random
    color rather than through a separate two-step creation form - the name
    and color inputs in the management list are then right there to edit,
    matching how the rest of this app's settings auto-save the moment they
@@ -553,23 +699,23 @@ function createNoteGroup() {
     .padStart(6, "0")}`;
 
   const transaction = db.transaction([STORE_NOTE_GROUPS], "readwrite");
-  transaction.objectStore(STORE_NOTE_GROUPS).add({ name: "New Group", color: randomColor });
+  transaction.objectStore(STORE_NOTE_GROUPS).add({ name: "New Tag", color: randomColor });
   transaction.oncomplete = () => fetchNotesLibrary();
 }
 
-function deleteNoteGroup(groupId) {
-  if (!confirm('Delete this group? Notes inside will move to "No Group" rather than being deleted.')) return;
+function deleteNoteTag(tagId) {
+  if (!confirm('Delete this tag? Notes carrying it will simply lose that tag rather than being deleted.')) return;
 
   const transaction = db.transaction([STORE_NOTES, STORE_NOTE_GROUPS], "readwrite");
   const notesStore = transaction.objectStore(STORE_NOTES);
-  const groupsStore = transaction.objectStore(STORE_NOTE_GROUPS);
+  const tagsStore = transaction.objectStore(STORE_NOTE_GROUPS);
 
-  groupsStore.delete(groupId);
+  tagsStore.delete(tagId);
 
   notesStore.getAll().onsuccess = (e) => {
     e.target.result.forEach((note) => {
-      if (note.groupId === groupId) {
-        note.groupId = null;
+      if (note.tagIds && note.tagIds.includes(tagId)) {
+        note.tagIds = note.tagIds.filter((id) => id !== tagId);
         notesStore.put(note);
       }
     });

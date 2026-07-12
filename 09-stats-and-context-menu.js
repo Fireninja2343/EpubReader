@@ -62,9 +62,10 @@ function toggleBookContextMenuFlyout(event, bookIndexId) {
     currentActiveContextBookIndexId = bookIndexId;
     const menu = document.getElementById("book-context-menu");
 
-    menu.style.display = "block";
-    menu.style.left = `${event.clientX + window.scrollX}px`;
-    menu.style.top = `${event.clientY + window.scrollY}px`;
+    // Flips to the left of the dots trigger (or clamps vertically) if the
+    // default placement would run off the edge of the viewport - see
+    // positionFlyoutMenu in 10-utils.js.
+    positionFlyoutMenu(menu, event);
 
     // Wire listener to capture closing ticks anywhere across workspace window scopes
     document.addEventListener("click", closeBookContextMenuFlyoutOnceOutside);

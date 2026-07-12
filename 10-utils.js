@@ -37,6 +37,49 @@ function escapeHtml(str) {
     .replace(/'/g, "&#39;");
 }
 
+/*
+ Shared positioning logic for the small floating "3 dots" action menus
+ (book-context-menu, note-context-menu). Opening a menu near the right edge
+ of the viewport used to just place it at the click coordinates, which let
+ it extend off-screen with no way to reach the cut-off items. This instead
+ measures the menu against the trigger button and the current viewport,
+ flipping it to the opposite side whenever the default side would touch or
+ exceed that edge, and clamps vertically the same way so short/tall
+ viewports don't cut it off either.
+*/
+function positionFlyoutMenu(menu, triggerEvent) {
+  const triggerRect = triggerEvent.currentTarget.getBoundingClientRect();
+
+  // Make the menu visible (but off in the corner) first so its natural
+  // width/height can actually be measured before it's positioned for real.
+  menu.style.display = "block";
+  menu.style.left = "0px";
+  menu.style.top = "0px";
+  const menuRect = menu.getBoundingClientRect();
+
+  // Default: open to the right of the trigger. Flip to the left if that
+  // would touch or exceed the right edge of the viewport.
+  let left = triggerRect.right;
+  if (left + menuRect.width >= window.innerWidth) {
+    left = triggerRect.left - menuRect.width;
+  }
+  // If flipping left would touch or exceed the left edge too (e.g. a
+  // narrow viewport), fall back to the right side and just clamp it.
+  if (left <= 0) {
+    left = triggerRect.right;
+  }
+  left = Math.max(0, Math.min(left, window.innerWidth - menuRect.width));
+
+  let top = triggerRect.top;
+  if (top + menuRect.height >= window.innerHeight) {
+    top = window.innerHeight - menuRect.height;
+  }
+  top = Math.max(0, top);
+
+  menu.style.left = `${left + window.scrollX}px`;
+  menu.style.top = `${top + window.scrollY}px`;
+}
+
 function base64ToBlob(base64) {
   const [header, data] = base64.split(",");
   const mime = header.match(/:(.*?);/)[1];

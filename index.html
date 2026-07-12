@@ -142,9 +142,9 @@
         <hr class="hr-divider" />
 
         <div class="flex-between notes-toolbar">
-            <div id="note-group-filter-row" class="note-group-filter-row"></div>
+            <div id="note-tag-filter-row" class="note-tag-filter-row"></div>
             <div class="flex-gap8">
-                <button onclick="openNoteGroupManageModal()">🎨 Manage Groups</button>
+                <button onclick="openNoteTagManageModal()">🏷️ Manage Tags</button>
                 <button onclick="openManualNoteCreationModal()">➕ Add Note</button>
             </div>
         </div>
@@ -314,11 +314,10 @@
     </div>
 
     <div id="note-context-menu">
-        <div class="context-item-row" onclick="triggerNoteContextAction('editText')">✏️ Edit Note (Text)</div>
-        <div class="context-item-row" onclick="triggerNoteContextAction('editComment')">💬 Edit Comment</div>
-        <div class="context-item-row" onclick="triggerNoteContextAction('editGroup')">📁 Edit Group</div>
+        <div class="context-item-row" onclick="triggerNoteContextAction('edit')">✏️ Edit Note</div>
+        <div class="context-item-row" onclick="triggerNoteContextAction('moveTags')">🏷️ Move Note (Tag)</div>
         <hr class="hr-divider-tight">
-        <div class="context-item-row context-item-danger" onclick="triggerNoteContextAction('delete')">🗑️ Delete</div>
+        <div class="context-item-row context-item-danger" onclick="triggerNoteContextAction('delete')">🗑️ Delete Note</div>
     </div>
 
     <dialog id="book-metrics-modal" class="custom-modal">
@@ -334,7 +333,7 @@
 
     <dialog id="note-editor-modal" class="custom-modal">
         <div class="modal-content">
-            <h3>Add Note</h3>
+            <h3 id="note-editor-modal-heading">Add Note</h3>
             <hr class="hr-divider-spaced" />
             <div class="control-item">
                 <label>Text</label>
@@ -345,8 +344,12 @@
                 <textarea id="note-editor-comment-input" class="full-width-input note-editor-textarea note-editor-textarea-short" placeholder="Add a thought or comment..."></textarea>
             </div>
             <div class="control-item">
-                <label>Group</label>
-                <select id="note-editor-group-select" class="full-width-input"></select>
+                <label>Book</label>
+                <select id="note-editor-book-select" class="full-width-input"></select>
+            </div>
+            <div class="control-item">
+                <label>Tags</label>
+                <div id="note-editor-tags-container" class="note-editor-tag-checkboxes"></div>
             </div>
             <div class="modal-actions">
                 <button onclick="closeNoteEditorModal()" class="btn-ghost">Cancel</button>
@@ -355,14 +358,29 @@
         </div>
     </dialog>
 
-    <dialog id="note-group-manage-modal" class="custom-modal">
+    <dialog id="note-tag-picker-modal" class="custom-modal">
         <div class="modal-content">
-            <h3>Manage Note Groups</h3>
+            <h3>Move Note (Tag)</h3>
             <hr class="hr-divider-spaced" />
-            <div id="note-group-manage-list" class="note-group-manage-list"></div>
-            <button onclick="createNoteGroup()" class="btn-ghost note-group-add-btn">➕ New Group</button>
+            <div class="control-item">
+                <label>Tags</label>
+                <div id="note-tag-picker-container" class="note-editor-tag-checkboxes"></div>
+            </div>
             <div class="modal-actions">
-                <button onclick="closeNoteGroupManageModal()" class="btn-accent btn-compact">Done</button>
+                <button onclick="closeNoteTagPickerModal()" class="btn-ghost">Cancel</button>
+                <button onclick="submitNoteTagPickerForm()" class="btn-accent">Save</button>
+            </div>
+        </div>
+    </dialog>
+
+    <dialog id="note-tag-manage-modal" class="custom-modal">
+        <div class="modal-content">
+            <h3>Manage Note Tags</h3>
+            <hr class="hr-divider-spaced" />
+            <div id="note-tag-manage-list" class="note-tag-manage-list"></div>
+            <button onclick="createNoteTag()" class="btn-ghost note-tag-add-btn">➕ New Tag</button>
+            <div class="modal-actions">
+                <button onclick="closeNoteTagManageModal()" class="btn-accent btn-compact">Done</button>
             </div>
         </div>
     </dialog>
