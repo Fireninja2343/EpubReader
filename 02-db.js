@@ -70,6 +70,16 @@ function fetchLocalLibrary() {
          option (title, date added, progress, etc.) the user currently
          has selected, so the UI reflects that ordering right away. */
       sortLibrary();
+      /*
+       Fire-and-forget: backfills totalPages/totalWords/chapterCount on any
+       book that predates those fields (see ensureBookMetadataCached() in
+       06-epub-reader.js). Not awaited here so the library still renders
+       immediately; it's a no-op per book once that book has been migrated,
+       so calling it after every fetch costs nothing on repeat visits.
+      */
+      if (typeof migrateMissingBookMetadata === "function") {
+        migrateMissingBookMetadata();
+      }
     };
   };
 }
@@ -78,7 +88,7 @@ function fetchLocalLibrary() {
 // written to IndexedDB (previously this function returned nothing, so
 // handleFileImport()'s "await saveBookToDatabase(...)" was never really
 // waiting for anything — see the fix in 06-epub-reader.js).
-function saveBookToDatabase(title, coverData, binaryData) {
+function saveBookToDatabase(title, coverData, binaryData, analysisMeta = {}) {
   return new Promise((resolve) => {
     const transaction = db.transaction([STORE_BOOKS], "readwrite");
     const store = transaction.objectStore(STORE_BOOKS);
@@ -98,6 +108,20 @@ function saveBookToDatabase(title, coverData, binaryData) {
       /* Timestamp used later to decide which copy (this device's or the
          cloud's) is newer when reconciling data during a Firebase sync. */
       lastModified: new Date().getTime(),
+      /* One-time EPUB analysis computed by the caller from the zip it
+         already has open (see handleFileImport in 06-epub-reader.js), so
+         the stats views never need to reparse this file just to show page
+         counts. Left null if the caller didn't pass anything, in which
+         case ensureBookMetadataCached() will backfill it later. */
+      totalPages: analysisMeta.totalPages ?? null,
+      totalWords: analysisMeta.totalWords ?? null,
+      chapterCount: analysisMeta.chapterCount ?? null,
+      /* Reading-history fields, updated as the book is actually read: see
+         recordReadingSessionStart() below and markBookAsRead(). */
+      firstOpened: null,
+      lastOpened: null,
+      completedDate: null,
+      totalSessions: 0,
     };
     store.add(entry).onsuccess = (e) => {
       const newId = e.target.result;
@@ -181,10 +205,43 @@ function markBookAsRead(bookId) {
     const record = e.target.result;
     if (record && !record.isRead) {
       record.isRead = true;
+      record.completedDate = new Date().getTime();
       record.lastModified = new Date().getTime();
       store.put(record);
       if (activeBookObject && activeBookObject.id === bookId) {
         activeBookObject.isRead = true;
+        activeBookObject.completedDate = record.completedDate;
+      }
+      if (typeof pushBookMetadataToCloud === "function") {
+        pushBookMetadataToCloud(record);
+      }
+    }
+  };
+}
+
+/*
+ Called once per reader launch (see launchEpubReader() in
+ 06-epub-reader.js) - every visit to the reader counts as a new reading
+ session for that book. firstOpened is only ever set the first time;
+ lastOpened and totalSessions update on every open after that.
+*/
+function recordReadingSessionStart(bookId) {
+  if (!bookId || !db) return;
+  const transaction = db.transaction([STORE_BOOKS], "readwrite");
+  const store = transaction.objectStore(STORE_BOOKS);
+  store.get(bookId).onsuccess = (e) => {
+    const record = e.target.result;
+    if (record) {
+      const now = new Date().getTime();
+      if (!record.firstOpened) record.firstOpened = now;
+      record.lastOpened = now;
+      record.totalSessions = (record.totalSessions || 0) + 1;
+      record.lastModified = now;
+      store.put(record);
+      if (activeBookObject && activeBookObject.id === bookId) {
+        activeBookObject.firstOpened = record.firstOpened;
+        activeBookObject.lastOpened = record.lastOpened;
+        activeBookObject.totalSessions = record.totalSessions;
       }
       if (typeof pushBookMetadataToCloud === "function") {
         pushBookMetadataToCloud(record);

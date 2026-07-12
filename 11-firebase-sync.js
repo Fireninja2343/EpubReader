@@ -169,6 +169,16 @@ async function pushBookMetadataToCloud(book) {
         dateImported: book.dateImported ?? null,
         groupId: book.groupId ?? null,
         lastModified: book.lastModified || Date.now(),
+        timeSpentSeconds: book.timeSpentSeconds ?? 0,
+        // Cached EPUB analysis - see ensureBookMetadataCached() in 06-epub-reader.js.
+        totalPages: book.totalPages ?? null,
+        totalWords: book.totalWords ?? null,
+        chapterCount: book.chapterCount ?? null,
+        // Reading-history fields - see recordReadingSessionStart() and markBookAsRead() in 02-db.js.
+        firstOpened: book.firstOpened ?? null,
+        lastOpened: book.lastOpened ?? null,
+        completedDate: book.completedDate ?? null,
+        totalSessions: book.totalSessions ?? 0,
       },
       { merge: true },
     );
@@ -344,6 +354,21 @@ function applyRemoteBookUpdate(bookId, remote) {
         rec.groupId = remote.groupId;
         rec.sortOrder = remote.sortOrder;
         rec.lastModified = remote.lastModified;
+        rec.timeSpentSeconds = remote.timeSpentSeconds ?? rec.timeSpentSeconds;
+        /*
+         Cached EPUB analysis and reading-history fields only overwrite the
+         local copy if the remote doc actually has them set. Without the ??
+         fallback, a book synced from a device that hasn't picked up this
+         feature yet (or a remote doc written before these fields existed)
+         would null out data this device already computed locally.
+        */
+        rec.totalPages = remote.totalPages ?? rec.totalPages;
+        rec.totalWords = remote.totalWords ?? rec.totalWords;
+        rec.chapterCount = remote.chapterCount ?? rec.chapterCount;
+        rec.firstOpened = remote.firstOpened ?? rec.firstOpened;
+        rec.lastOpened = remote.lastOpened ?? rec.lastOpened;
+        rec.completedDate = remote.completedDate ?? rec.completedDate;
+        rec.totalSessions = remote.totalSessions ?? rec.totalSessions;
         store.put(rec);
       }
     };
@@ -383,6 +408,16 @@ async function downloadBookFromCloud(bookId, remoteMeta) {
         dateImported: remoteMeta.dateImported,
         groupId: remoteMeta.groupId,
         lastModified: remoteMeta.lastModified,
+        timeSpentSeconds: remoteMeta.timeSpentSeconds ?? 0,
+        // Cached EPUB analysis, if the remote doc has it - ensureBookMetadataCached()
+        // will backfill it locally later if not (e.g. an older remote doc).
+        totalPages: remoteMeta.totalPages ?? null,
+        totalWords: remoteMeta.totalWords ?? null,
+        chapterCount: remoteMeta.chapterCount ?? null,
+        firstOpened: remoteMeta.firstOpened ?? null,
+        lastOpened: remoteMeta.lastOpened ?? null,
+        completedDate: remoteMeta.completedDate ?? null,
+        totalSessions: remoteMeta.totalSessions ?? 0,
       });
       tx.oncomplete = resolve;
     });
