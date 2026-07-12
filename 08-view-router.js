@@ -5,6 +5,8 @@ function showReaderState() {
     // 1. Switch primary workspace canvas panels
     document.getElementById("library-view").classList.remove("active");
     document.getElementById("library-view").style.display = "none";
+    const notesViewEl = document.getElementById("notes-view");
+    if (notesViewEl) notesViewEl.style.display = "none";
     document.getElementById("reader-view").classList.add("active");
     document.getElementById("reader-view").style.display = "flex";
 
@@ -35,6 +37,8 @@ function showLibraryState() {
     document.getElementById("reader-view").classList.remove("active");
     document.getElementById("reader-view").style.display = "none";
     document.getElementById("stats-view").style.display = "none";
+    const notesViewEl = document.getElementById("notes-view");
+    if (notesViewEl) notesViewEl.style.display = "none";
     document.getElementById("library-view").classList.add("active");
     document.getElementById("library-view").style.display = "flex";
 

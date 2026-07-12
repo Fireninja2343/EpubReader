@@ -28,6 +28,7 @@
     <script src="09-stats-and-context-menu.js" defer></script>
     <script src="10-utils.js" defer></script>
     <script src="11-firebase-sync.js" defer></script>
+    <script src="12-notes.js" defer></script>
 </head>
 
 <body>
@@ -59,6 +60,7 @@
             <button onclick="stepToNextChapter()" >Next Chapter ⏭️</button>
         </div>
             <button id="btn-global-stats" onclick="showStatsViewState()">📊 Stats</button>
+            <button id="btn-global-notes" onclick="showNotesViewState()">🗒️ Notes</button>
 
         <div class="nav-group">
             <span id="current-book-indicator"></span>
@@ -126,6 +128,27 @@
                 <tbody id="stats-books-table-body"></tbody>
             </table>
         </div>
+    </div>
+
+    <div id="notes-view" class="view-panel">
+        <div class="flex-between">
+            <h2>🗒️ Notes</h2>
+            <button onclick="showLibraryState()" class="btn-stats-back">
+                Back to Library
+            </button>
+        </div>
+
+        <hr class="hr-divider" />
+
+        <div class="flex-between notes-toolbar">
+            <div id="note-group-filter-row" class="note-group-filter-row"></div>
+            <div class="flex-gap8">
+                <button onclick="openNoteGroupManageModal()">🎨 Manage Groups</button>
+                <button onclick="openManualNoteCreationModal()">➕ Add Note</button>
+            </div>
+        </div>
+
+        <div id="notes-list-container" class="notes-list-container"></div>
     </div>
 
     <div id="app-container">
@@ -259,6 +282,41 @@
             <div id="metrics-modal-body"></div>
             <div class="modal-actions">
                 <button onclick="document.getElementById('book-metrics-modal').close()" class="btn-accent btn-compact">Close</button>
+            </div>
+        </div>
+    </dialog>
+
+    <dialog id="note-editor-modal" class="custom-modal">
+        <div class="modal-content">
+            <h3>Add Note</h3>
+            <hr class="hr-divider-spaced" />
+            <div class="control-item">
+                <label>Text</label>
+                <textarea id="note-editor-text-input" class="full-width-input note-editor-textarea" placeholder="Enter text"></textarea>
+            </div>
+            <div class="control-item">
+                <label>Comment (optional)</label>
+                <textarea id="note-editor-comment-input" class="full-width-input note-editor-textarea note-editor-textarea-short" placeholder="Add a thought or comment..."></textarea>
+            </div>
+            <div class="control-item">
+                <label>Group</label>
+                <select id="note-editor-group-select" class="full-width-input"></select>
+            </div>
+            <div class="modal-actions">
+                <button onclick="closeNoteEditorModal()" class="btn-ghost">Cancel</button>
+                <button onclick="submitNoteEditorForm()" class="btn-accent">Save Note</button>
+            </div>
+        </div>
+    </dialog>
+
+    <dialog id="note-group-manage-modal" class="custom-modal">
+        <div class="modal-content">
+            <h3>Manage Note Groups</h3>
+            <hr class="hr-divider-spaced" />
+            <div id="note-group-manage-list" class="note-group-manage-list"></div>
+            <button onclick="createNoteGroup()" class="btn-ghost note-group-add-btn">➕ New Group</button>
+            <div class="modal-actions">
+                <button onclick="closeNoteGroupManageModal()" class="btn-accent btn-compact">Done</button>
             </div>
         </div>
     </dialog>

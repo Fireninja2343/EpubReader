@@ -3,9 +3,11 @@ const Config = {
     DB_NAME: "LocalEpubReaderDB_v2",
     STORE_BOOKS: "books",
     STORE_GROUPS: "groups",
+    STORE_NOTES: "notes",
+    STORE_NOTE_GROUPS: "noteGroups",
   },
   AutoScroller: {
-    AUTOSCROLL_DEBUG: true,
+    AUTOSCROLL_DEBUG: false,
     MIN_STEP_PX: 20,
     MAX_STEP_PX: 500,
     FALLBACK_STEP_PX: 100,

@@ -1,5 +1,5 @@
 :root {
-    --bg-main: #2e1e1e;
+    --bg-main: #2e1f1e;
     --bg-sidebar: #251818;
     --bg-card: #382b25;
     --text-main: #f4f0de;
@@ -80,7 +80,7 @@ header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 0 20px;
+    padding: 0 10px;
     z-index: 10;
     box-shadow: 0 0 100px 20px rgba(0, 0, 0, .4);
     flex-shrink: 0;
@@ -105,7 +105,7 @@ header {
 
 #current-group-indicator {
     font-weight: 600;
-    color: var(--accent);
+    color: var(--group-tint, var(--accent));
     display: none;
 }
 
@@ -113,10 +113,10 @@ button, label.btn {
     background-color: var(--bg-card);
     color: var(--text-main);
     border: 1px solid var(--border);
-    padding: 6px 6px;
+    padding: 6px 4px;
     border-radius: 4px;
     cursor: pointer;
-    font-size: 14px;
+    font-size: 13.5px;
     display: inline-block;
 }
 
@@ -129,7 +129,7 @@ select {
     background-color: var(--bg-card);
     color: var(--text-main);
     border: 1px solid var(--border);
-    padding: 6px;
+    padding: 6px 4px;
     border-radius: 4px;
     outline: none;
 }
@@ -1012,6 +1012,194 @@ footer {
 }
 
 /* ==========================================================================
+   NOTES FEATURE
+   ========================================================================== */
+
+/* Floating "Add Note" button that appears near a text selection made while reading */
+.note-selection-trigger-btn {
+    position: fixed;
+    z-index: 1500;
+    background-color: var(--accent);
+    color: #000;
+    font-weight: bold;
+    font-size: 12.5px;
+    border: none;
+    border-radius: 4px;
+    padding: 6px 10px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+    cursor: pointer;
+}
+
+/* --- Notes page --- */
+#notes-view {
+    display: none;
+    flex-direction: column;
+    padding: 30px;
+    gap: 20px;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    height: calc(100vh - 120px);
+    height: calc(100dvh - 120px);
+    z-index: 200;
+    min-height: 0;
+    margin-top: 30px;
+}
+
+.notes-toolbar {
+    align-items: flex-start;
+}
+
+.note-group-filter-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+/* Each filter checkbox gets a small colored dot borrowed from its group's own
+   color via --group-tint, so the filter row doubles as a color legend for
+   the sections rendered below it. */
+.note-group-filter-chip {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background-color: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 5px 12px 5px 8px;
+    font-size: 12.5px;
+    cursor: pointer;
+}
+
+.note-group-filter-chip::before {
+    content: "";
+    display: block;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background-color: var(--group-tint, var(--text-muted));
+}
+
+.notes-list-container {
+    display: flex;
+    flex-direction: column;
+    gap: 25px;
+}
+
+.notes-empty-state {
+    color: var(--text-muted);
+    font-size: 14px;
+    text-align: center;
+    padding: 30px 10px;
+}
+
+.note-group-section {
+    border-left: 3px solid var(--group-tint, var(--border));
+    padding-left: 15px;
+}
+
+.note-group-section-heading {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--group-tint, var(--text-main));
+    margin-bottom: 12px;
+}
+
+.notes-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 15px;
+}
+
+.note-card {
+    background-color: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 14px;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.note-card-delete-btn {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-size: 12px;
+    padding: 2px 6px;
+}
+
+.note-card-delete-btn:hover {
+    color: #ff6c6c;
+    border-color: transparent;
+}
+
+.note-card-book-tag {
+    font-size: 11px;
+    color: var(--text-muted);
+    padding-right: 20px;
+}
+
+.note-card-quote {
+    font-size: 14px;
+    line-height: 1.5;
+    border-left: 2px solid var(--accent);
+    padding-left: 10px;
+    color: var(--text-main);
+}
+
+.note-card-comment {
+    font-size: 13px;
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+/* --- Note editor modal --- */
+.note-editor-textarea {
+    resize: vertical;
+    min-height: 90px;
+    font-family: inherit;
+    background-color: var(--bg-card);
+    border: 1px solid var(--border);
+    color: var(--text-main);
+    padding: 10px;
+    border-radius: 4px;
+    font-size: 14px;
+}
+
+.note-editor-textarea-short {
+    min-height: 50px;
+}
+
+/* --- Manage note groups modal --- */
+.note-group-manage-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    max-height: 300px;
+    overflow-y: auto;
+    margin-bottom: 15px;
+}
+
+.note-group-manage-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.note-group-manage-delete-btn {
+    font-size: 16px;
+    font-weight: bold;
+}
+
+.note-group-add-btn {
+    width: 100%;
+}
+
+/* ==========================================================================
    MOBILE / SMALL SCREEN LAYOUT
    ========================================================================== */
 @media (max-width: 1100px) {
@@ -1135,6 +1323,17 @@ footer {
 
     .group-card{
         padding: 6px;
+    }
+
+    #notes-view {
+        margin-top: 40px;
+        padding: 24px;
+        height: calc(100dvh - 100px);
+    }
+
+    .notes-grid {
+        grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+        gap: 10px;
     }
 }
 

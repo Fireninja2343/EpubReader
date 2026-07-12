@@ -5,6 +5,8 @@ let db = null;
 const DB_NAME = Config.Db.DB_NAME; // Incremented schema mapping database version
 const STORE_BOOKS = Config.Db.STORE_BOOKS;
 const STORE_GROUPS = Config.Db.STORE_GROUPS;
+const STORE_NOTES = Config.Db.STORE_NOTES;
+const STORE_NOTE_GROUPS = Config.Db.STORE_NOTE_GROUPS;
 
 let focusedTimeTrackerHeartbeatInterval = null;
 let currentActiveContextBookIndexId = null; // Refers to the targeted row index selected by the 3 dots panel trigger

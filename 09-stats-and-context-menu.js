@@ -258,6 +258,8 @@ async function openBookDiagnosticsModal(bookObj, modeType) {
 async function showStatsViewState() {
     document.getElementById("library-view").style.display = "none";
     document.getElementById("reader-view").style.display = "none";
+    const notesViewEl = document.getElementById("notes-view");
+    if (notesViewEl) notesViewEl.style.display = "none";
 
     const statsPanel = document.getElementById("stats-view");
     statsPanel.style.display = "flex";

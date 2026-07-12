@@ -50,6 +50,7 @@ function enterGroupView(groupId, groupName, colorVal = null) {
   document.getElementById("library-view").style.backgroundColor = colorVal ? `color-mix(in srgb, ${colorVal} 12%, var(--bg-main))` : "var(--bg-main)";
   document.getElementById("current-group-indicator").innerText = `📂 [Group: ${groupName}]`;
   document.getElementById("current-group-indicator").style.display = "inline";
+  document.getElementById("current-group-indicator").style.setProperty("--group-tint", colorVal || "");
   document.getElementById("btn-back-group").style.display = "inline-block";
   document.getElementById("library-view-mode").style.display = "none"; // Hide view toggle while inside a folder
   renderLibraryGrid(); // book-card tinting is applied inside buildBookCardsInLayout, reading activeGroupFilterColor
@@ -60,6 +61,7 @@ function exitGroupView() {
   activeGroupFilterColor = null;
   document.getElementById("library-view").style.backgroundColor = "var(--bg-main)";
   document.getElementById("current-group-indicator").style.display = "none";
+  document.getElementById("current-group-indicator").style.removeProperty("--group-tint");
   document.getElementById("btn-back-group").style.display = "none";
   document.getElementById("library-view-mode").style.display = "inline-block"; // Restore layout view selector controls
   renderLibraryGrid();

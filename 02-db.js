@@ -2,7 +2,12 @@
 // DATABASE MANAGEMENT PERSISTENCE CORE
 // -----------------------------------------------------------------
 function initIndexedDB() {
-  const request = indexedDB.open(DB_NAME, 1);
+  /*
+   Bumped from 1 to 2 to add the notes/noteGroups stores below. Existing
+   users on version 1 will have onupgradeneeded fire once, which only adds
+   the two new stores and leaves books/groups (and their data) untouched.
+  */
+  const request = indexedDB.open(DB_NAME, 2);
   request.onupgradeneeded = (e) => {
     const database = e.target.result;
     if (!database.objectStoreNames.contains(STORE_BOOKS)) {
@@ -17,10 +22,25 @@ function initIndexedDB() {
         autoIncrement: true,
       });
     }
+    if (!database.objectStoreNames.contains(STORE_NOTES)) {
+      database.createObjectStore(STORE_NOTES, {
+        keyPath: "id",
+        autoIncrement: true,
+      });
+    }
+    if (!database.objectStoreNames.contains(STORE_NOTE_GROUPS)) {
+      database.createObjectStore(STORE_NOTE_GROUPS, {
+        keyPath: "id",
+        autoIncrement: true,
+      });
+    }
   };
   request.onsuccess = (e) => {
     db = e.target.result;
     fetchLocalLibrary();
+    // Guarded the same way pushBookMetadataToCloud() calls are elsewhere in this
+    // codebase, since 12-notes.js only exists once the notes feature is loaded.
+    if (typeof fetchNotesLibrary === "function") fetchNotesLibrary();
   };
   // Without this handler, a failure to open IndexedDB (blocked by private
   // browsing settings, storage quota issues, another tab holding an
