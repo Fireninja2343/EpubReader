@@ -333,7 +333,7 @@ async function showStatsViewState() {
             <td style="padding:12px;">${escapeHtml(book.title)}</td>
             <td style="padding:12px; color:var(--accent);">${isRead ? "✅ Completed" : "📖 In Progress"}</td>
             <td style="padding:12px;">${pagesRead} / ${totalPages || "—"} pages</td>
-            <td style="padding:12px;">${mins} minutes</td>
+            <td style="padding:12px;">${formatMinutes(mins)}</td>
             <td style="padding:12px;">${pagesPerHour === "—" ? "—" : `${pagesPerHour} p/h`}</td>
         </tr>
         `);
