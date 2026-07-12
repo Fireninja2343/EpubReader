@@ -883,6 +883,10 @@ footer {
     text-shadow: 2px 2px 6px rgba(0,0,0,0.2);
 }
 
+.long-stat-value{
+    font-size: 16px;
+}
+
 .stat-value-neutral {
     color: var(--text-main);
 }
@@ -895,7 +899,6 @@ footer {
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: 6px;
-    overflow: auto;
     -webkit-overflow-scrolling: touch;
 }
 
@@ -1447,6 +1450,9 @@ footer {
 
     .stat-value {
         font-size: 16px;
+    }
+    .long-stat-value{
+        font-size: 12px;
     }
 
     .group-card{
