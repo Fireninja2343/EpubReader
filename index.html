@@ -49,15 +49,16 @@
             <button id="btn-export-json" onclick="exportLibraryToJSON()">📤 Export Backup</button>
             <button id="btn-import-json" onclick="document.getElementById('backup-picker').click()">📥 Import Backup</button>
             <input type="file" id="backup-picker" accept=".json" onchange="importLibraryFromJSON(event)">
+            <button id="btn-library-settings" onclick="openSettingsPanel('library')">⚙️ Settings</button>
         </div>
         
         <div class="nav-group" id="reader-controls">
-            <button onclick="toggleSidebar('toc-sidebar')">📖 Contents</button>
-            <button onclick="toggleSidebar('settings-sidebar')">⚙️ Settings</button>
+            <button id="btn-toggle-toc" onclick="toggleSidebar('toc-sidebar')">📖 Contents</button>
+            <button onclick="openSettingsPanel('reader')">⚙️ Settings</button>
             <button onclick="toggleScroll()">Toggle Scroll</button>
             <div id="scroll-bar"><div id="fill"></div></div>
-            <button onclick="stepToPrevChapter()" >⏮️ Previous Chapter</button>
-            <button onclick="stepToNextChapter()" >Next Chapter ⏭️</button>
+            <button id="btn-prev-chapter" onclick="stepToPrevChapter()" >⏮️ Previous Chapter</button>
+            <button id="btn-next-chapter" onclick="stepToNextChapter()" >Next Chapter ⏭️</button>
         </div>
             <button id="btn-global-stats" onclick="showStatsViewState()">📊 Stats</button>
             <button id="btn-global-notes" onclick="showNotesViewState()">🗒️ Notes</button>
@@ -166,57 +167,94 @@
             <div id="reader-container" onscroll="trackReadingProgress()">
                 <div id="text-render-frame"></div>
             </div>
+        </div>
+    </div>
 
-            <div id="settings-sidebar" class="reader-sidebar">
-                <button id="close-btn-settings" class="sidebar-close-btn" onclick="toggleSidebar('settings-sidebar')">X</button>
-                <div class="sidebar-heading sidebar-heading-top">Library Interface</div>
-                <div class="control-item">
-                    <label>Book Card Scale Dimension (<span id="lbl-card-size">160</span>px)</label>
-                    <input type="range" id="setting-card-size" min="100" max="260" value="160" oninput="applyLibraryInterfaceSettings()" />
-                </div>
-                <div class="sidebar-heading">Reader Configurations</div>
-                <div class="control-item control-item-top">
-                    <div class="flex-gap8">
-                        <input type="checkbox" id="setting-enable-color-override" onchange="handleColorOverrideToggle()">
-                        <label for="setting-enable-color-override">Override Default Text Color</label>
-                    </div>
-                    <div id="color-picker-wrapper">
-                        <input type="color" id="setting-font-color" value="#ffffff" onchange="saveAndApplyUserStyles()">
-                        <span class="hint-text">Custom character hex paint</span>
-                    </div>
-                </div>
+    <div id="settings-sidebar" class="reader-sidebar">
+        <button id="close-btn-settings" class="sidebar-close-btn" onclick="toggleSidebar('settings-sidebar')">X</button>
 
-                <div class="control-item">
-                    <label>Font Style Profile</label>
-                    <select id="setting-font-family" onchange="saveAndApplyUserStyles()">
-                        <option value="system-ui">System Default</option>
-                        <option value="Georgia">Classic Serif</option>
-                        <option value="Courier New">Monospace</option>
-                        <option value="publisher">Publisher Default</option>
-                    </select>
+        <div id="library-settings-section">
+            <div class="sidebar-heading sidebar-heading-top">Library Interface</div>
+            <div class="control-item">
+                <label>Book Card Scale Dimension (<span id="lbl-card-size">160</span>px)</label>
+                <input type="range" id="setting-card-size" min="100" max="260" value="160" oninput="applyLibraryInterfaceSettings()" />
+            </div>
+        </div>
+
+        <div id="reader-settings-section">
+            <div class="sidebar-heading sidebar-heading-top">Reader UI Buttons</div>
+            <div class="control-item">
+                <span class="hint-text">Hide any optional buttons you don't use from the header.</span>
+            </div>
+            <div class="control-item">
+                <div class="flex-gap8">
+                    <input type="checkbox" id="toggle-btn-toc" checked onchange="handleReaderButtonToggle('toc', this.checked)">
+                    <label for="toggle-btn-toc">Show Contents Button</label>
                 </div>
-                <div class="control-item">
-                    <label>Text Scale (<span id="lbl-font-size">18</span>px)</label>
-                    <input type="range" id="setting-font-size" min="12" max="32" value="18" oninput="saveAndApplyUserStyles()">
+                <div class="flex-gap8">
+                    <input type="checkbox" id="toggle-btn-prev" checked onchange="handleReaderButtonToggle('prev', this.checked)">
+                    <label for="toggle-btn-prev">Show Previous Chapter Button</label>
                 </div>
-                <div class="control-item">
-                    <label>Line Height Scaling (<span id="lbl-line-spacing">1.6</span>)</label>
-                    <input type="range" id="setting-line-spacing" min="1.2" max="2.4" step="0.1" value="1.6"
-                     oninput="saveAndApplyUserStyles()">
+                <div class="flex-gap8">
+                    <input type="checkbox" id="toggle-btn-next" checked onchange="handleReaderButtonToggle('next', this.checked)">
+                    <label for="toggle-btn-next">Show Next Chapter Button</label>
                 </div>
-                <div class="control-item">
-                    <label>Paragraph Spacing (<span id="lbl-paragraph-spacing">1.5</span>em)</label>
-                    <input type="range" id="setting-paragraph-spacing" min="0.5" max="3.5" step="0.1" value="1.5"
-                     oninput="saveAndApplyUserStyles()">
+                <div class="flex-gap8">
+                    <input type="checkbox" id="toggle-btn-stats" checked onchange="handleReaderButtonToggle('stats', this.checked)">
+                    <label for="toggle-btn-stats">Show Stats Button</label>
                 </div>
-                <div class="control-item">
-                    <label>Page Margins Width (<span id="lbl-margins">15</span>%)</label>
-                    <input type="range" id="setting-margins" min="5" max="30" value="15" oninput="saveAndApplyUserStyles()">
+                <div class="flex-gap8">
+                    <input type="checkbox" id="toggle-btn-notes" checked onchange="handleReaderButtonToggle('notes', this.checked)">
+                    <label for="toggle-btn-notes">Show Notes Button</label>
                 </div>
-                <div class="control-item">
-                    <label>Scroll Delay (<span id="lbl-scroll-speed">5</span>s)</label>
-                    <input type="range" id="setting-scroll-delay" min="1" max="10" step="0.5" value="5" oninput="saveAndApplyUserStyles()">
+                <div class="flex-gap8">
+                    <input type="checkbox" id="toggle-btn-themes" checked onchange="handleReaderButtonToggle('themes', this.checked)">
+                    <label for="toggle-btn-themes">Show Themes Selector</label>
                 </div>
+            </div>
+
+            <div class="sidebar-heading">Reader Configurations</div>
+            <div class="control-item control-item-top">
+                <div class="flex-gap8">
+                    <input type="checkbox" id="setting-enable-color-override" onchange="handleColorOverrideToggle()">
+                    <label for="setting-enable-color-override">Override Default Text Color</label>
+                </div>
+                <div id="color-picker-wrapper">
+                    <input type="color" id="setting-font-color" value="#ffffff" onchange="saveAndApplyUserStyles()">
+                    <span class="hint-text">Custom character hex paint</span>
+                </div>
+            </div>
+
+            <div class="control-item">
+                <label>Font Style Profile</label>
+                <select id="setting-font-family" onchange="saveAndApplyUserStyles()">
+                    <option value="system-ui">System Default</option>
+                    <option value="Georgia">Classic Serif</option>
+                    <option value="Courier New">Monospace</option>
+                    <option value="publisher">Publisher Default</option>
+                </select>
+            </div>
+            <div class="control-item">
+                <label>Text Scale (<span id="lbl-font-size">18</span>px)</label>
+                <input type="range" id="setting-font-size" min="12" max="32" value="18" oninput="saveAndApplyUserStyles()">
+            </div>
+            <div class="control-item">
+                <label>Line Height Scaling (<span id="lbl-line-spacing">1.6</span>)</label>
+                <input type="range" id="setting-line-spacing" min="1.2" max="2.4" step="0.1" value="1.6"
+                 oninput="saveAndApplyUserStyles()">
+            </div>
+            <div class="control-item">
+                <label>Paragraph Spacing (<span id="lbl-paragraph-spacing">1.5</span>em)</label>
+                <input type="range" id="setting-paragraph-spacing" min="0.5" max="3.5" step="0.1" value="1.5"
+                 oninput="saveAndApplyUserStyles()">
+            </div>
+            <div class="control-item">
+                <label>Page Margins Width (<span id="lbl-margins">15</span>%)</label>
+                <input type="range" id="setting-margins" min="5" max="30" value="15" oninput="saveAndApplyUserStyles()">
+            </div>
+            <div class="control-item">
+                <label>Scroll Delay (<span id="lbl-scroll-speed">5</span>s)</label>
+                <input type="range" id="setting-scroll-delay" min="1" max="10" step="0.5" value="5" oninput="saveAndApplyUserStyles()">
             </div>
         </div>
     </div>
@@ -273,6 +311,14 @@
         <div class="context-item-row" onclick="triggerContextAction('group')">📁 Manage Group</div>
         <hr class="hr-divider-tight">
         <div class="context-item-row context-item-danger" onclick="triggerContextAction('delete')">🗑️ Delete Book</div>
+    </div>
+
+    <div id="note-context-menu">
+        <div class="context-item-row" onclick="triggerNoteContextAction('editText')">✏️ Edit Note (Text)</div>
+        <div class="context-item-row" onclick="triggerNoteContextAction('editComment')">💬 Edit Comment</div>
+        <div class="context-item-row" onclick="triggerNoteContextAction('editGroup')">📁 Edit Group</div>
+        <hr class="hr-divider-tight">
+        <div class="context-item-row context-item-danger" onclick="triggerNoteContextAction('delete')">🗑️ Delete</div>
     </div>
 
     <dialog id="book-metrics-modal" class="custom-modal">

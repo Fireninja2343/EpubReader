@@ -328,6 +328,29 @@ select {
     display: flex;
 }
 
+/* Settings now lives as a sibling of #app-container (rather than nested inside
+   #reader-view) so it can be opened from the library too, not just the reader.
+   It's no longer part of the reader's horizontal sidebar/content/sidebar flex
+   row, so it needs its own fixed overlay positioning to sit correctly regardless
+   of which underlying view (library or reader) happens to be active. */
+#settings-sidebar {
+    position: fixed;
+    top: 0;
+    right: 0;
+    height: 100vh;
+    height: 100dvh;
+    z-index: 950;
+    box-shadow: -4px 0 14px rgba(0, 0, 0, 0.4);
+}
+
+/* Hard-hides an optional reader header button/control the user has toggled
+   off in Settings. Uses !important because the view router (showLibraryState/
+   showReaderState) sets inline display styles directly on some of these same
+   elements, which would otherwise override a plain class-based display:none. */
+.ui-btn-hidden {
+    display: none !important;
+}
+
 .sidebar-heading {
     font-size: 16px;
     font-weight: 700;
@@ -969,6 +992,20 @@ footer {
     color: #ff6c6c;
 }
 
+/* --- Note context menu (mirrors #book-context-menu) --- */
+#note-context-menu {
+    display: none;
+    position: absolute;
+    z-index: 1000;
+    background: var(--bg-sidebar);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+    padding: 5px 0;
+    min-width: 160px;
+    max-width: 90vw;
+}
+
 /* --- Book metrics modal --- */
 #book-metrics-modal {
     width: 420px;
@@ -1121,26 +1158,34 @@ footer {
     gap: 8px;
 }
 
-.note-card-delete-btn {
+.note-card-actions-trigger {
     position: absolute;
     top: 8px;
     right: 8px;
+    width: 24px;
+    height: 24px;
     background: none;
     border: none;
     color: var(--text-muted);
-    font-size: 12px;
-    padding: 2px 6px;
+    font-size: 16px;
+    font-weight: bold;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    cursor: pointer;
 }
 
-.note-card-delete-btn:hover {
-    color: #ff6c6c;
-    border-color: transparent;
+.note-card-actions-trigger:hover {
+    background-color: var(--bg-sidebar);
+    color: var(--accent);
 }
 
 .note-card-book-tag {
     font-size: 11px;
     color: var(--text-muted);
-    padding-right: 20px;
+    padding-right: 28px;
 }
 
 .note-card-quote {

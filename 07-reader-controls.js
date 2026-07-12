@@ -224,9 +224,62 @@ function loadSavedUserInterfaceSettings() {
                 applyLibraryInterfaceSettings();
             }
         }
+
+        // Hydrate which optional reader header buttons the user has hidden
+        if (config.hiddenReaderButtons) {
+            Object.keys(READER_BUTTON_ELEMENT_MAP).forEach((key) => {
+                const isHidden = !!config.hiddenReaderButtons[key];
+                const checkbox = document.getElementById(`toggle-btn-${key}`);
+                if (checkbox) checkbox.checked = !isHidden;
+                applyReaderButtonVisibility(key, isHidden);
+            });
+        }
     } catch (e) {
         console.warn("Failed hydrating interface parameters configurations profiles", e);
     }
+}
+
+// =================================================================
+// OPTIONAL READER HEADER BUTTON VISIBILITY (Settings > Reader UI Buttons)
+// =================================================================
+/*
+ Only buttons that aren't required for core functionality are toggleable
+ here (chapter navigation, contents, stats, notes, themes) - things like
+ the Library button or Toggle Scroll aren't included since hiding them
+ would strand the user with no way back to their library or no way to
+ use a core reading feature.
+*/
+const READER_BUTTON_ELEMENT_MAP = {
+    toc: "btn-toggle-toc",
+    prev: "btn-prev-chapter",
+    next: "btn-next-chapter",
+    stats: "btn-global-stats",
+    notes: "btn-global-notes",
+    themes: "theme-selector",
+};
+
+function handleReaderButtonToggle(key, isChecked) {
+    const shouldHide = !isChecked;
+    applyReaderButtonVisibility(key, shouldHide);
+    persistReaderButtonVisibilitySetting(key, shouldHide);
+}
+
+function applyReaderButtonVisibility(key, shouldHide) {
+    const elementId = READER_BUTTON_ELEMENT_MAP[key];
+    const el = elementId ? document.getElementById(elementId) : null;
+    if (!el) return;
+    el.classList.toggle("ui-btn-hidden", shouldHide);
+}
+
+function persistReaderButtonVisibilitySetting(key, isHidden) {
+    const saved = localStorage.getItem("EpubReader_UserConfig_v1");
+    let config = {};
+    if (saved) {
+        try { config = JSON.parse(saved); } catch (e) {}
+    }
+    if (!config.hiddenReaderButtons) config.hiddenReaderButtons = {};
+    config.hiddenReaderButtons[key] = isHidden;
+    localStorage.setItem("EpubReader_UserConfig_v1", JSON.stringify(config));
 }
 
 function saveAndApplyUserStyles() {
@@ -241,8 +294,17 @@ function saveAndApplyUserStyles() {
     const scrollSpeed = document.getElementById("setting-scroll-delay").value;
     const cardSize = document.getElementById("setting-card-size")?.value || "160";
 
-    // 2. Package parameters bundle for LocalStorage tracking dumps
-    const interfaceConfigurationPackage = {
+    // 2. Merge into whatever config is already saved (rather than replacing
+    //    it outright), so unrelated saved settings - like cardSize or the
+    //    hiddenReaderButtons toggles below - don't get silently wiped out
+    //    every time a font/style control changes.
+    const savedRaw = localStorage.getItem("EpubReader_UserConfig_v1");
+    let interfaceConfigurationPackage = {};
+    if (savedRaw) {
+        try { interfaceConfigurationPackage = JSON.parse(savedRaw); } catch (e) {}
+    }
+
+    Object.assign(interfaceConfigurationPackage, {
         fontFamily: font,
         fontSize: size,
         lineSpacing: lineSpacing,
@@ -252,8 +314,8 @@ function saveAndApplyUserStyles() {
         fontColor: color,
         scrollSpeed: scrollSpeed,
         cardSize: cardSize
-    };
-    
+    });
+
     localStorage.setItem("EpubReader_UserConfig_v1", JSON.stringify(interfaceConfigurationPackage));
 
     // 3. Bind UI configurations down onto the text render frames context viewport
@@ -321,6 +383,30 @@ function toggleSidebar(id) {
     .querySelectorAll(".reader-sidebar")
     .forEach((s) => s.classList.remove("active"));
   if (!isOpen) bar.classList.add("active");
+}
+
+/*
+ Settings is reachable both from the library and from the reader (it now
+ lives outside #reader-view so it isn't hidden away with the reader panel -
+ see index.html/styles.css). The content is identical either way; only the
+ order of the two sections changes, so the Reader Settings block is right
+ at hand while actually reading, but tucked at the bottom (after the
+ library-oriented settings) when opened from the library.
+*/
+function openSettingsPanel(context) {
+    const sidebar = document.getElementById("settings-sidebar");
+    const librarySection = document.getElementById("library-settings-section");
+    const readerSection = document.getElementById("reader-settings-section");
+
+    if (sidebar && librarySection && readerSection) {
+        if (context === "reader") {
+            sidebar.insertBefore(readerSection, librarySection);
+        } else {
+            sidebar.appendChild(readerSection);
+        }
+    }
+
+    toggleSidebar("settings-sidebar");
 }
 
 function changeActiveTheme(themeKey) {

@@ -333,12 +333,12 @@ function buildNoteCard(note) {
   const card = document.createElement("div");
   card.className = "note-card";
 
-  const deleteBtn = document.createElement("button");
-  deleteBtn.className = "note-card-delete-btn";
-  deleteBtn.innerText = "✕";
-  deleteBtn.title = "Delete note";
-  deleteBtn.onclick = () => deleteNote(note.id);
-  card.appendChild(deleteBtn);
+  const actionsTrigger = document.createElement("button");
+  actionsTrigger.className = "note-card-actions-trigger";
+  actionsTrigger.innerText = "⋮";
+  actionsTrigger.title = "Note actions";
+  actionsTrigger.onclick = (e) => toggleNoteContextMenuFlyout(e, note.id);
+  card.appendChild(actionsTrigger);
 
   if (note.bookTitle) {
     const bookTag = document.createElement("div");
@@ -370,6 +370,101 @@ function deleteNote(noteId) {
   if (!confirm("Delete this note? This cannot be undone.")) return;
   const transaction = db.transaction([STORE_NOTES], "readwrite");
   transaction.objectStore(STORE_NOTES).delete(noteId);
+  transaction.oncomplete = () => fetchNotesLibrary();
+}
+
+// -----------------------------------------------------------------
+// PER-NOTE 3-DOTS ACTIONS FLYOUT
+// Mirrors the book-context-menu pattern in 09-stats-and-context-menu.js:
+// one shared floating menu, positioned at the click, that acts on whichever
+// note's trigger was last clicked.
+// -----------------------------------------------------------------
+let currentActiveContextNoteId = null;
+
+function toggleNoteContextMenuFlyout(event, noteId) {
+  event.preventDefault();
+  event.stopPropagation();
+
+  currentActiveContextNoteId = noteId;
+  const menu = document.getElementById("note-context-menu");
+
+  menu.style.display = "block";
+  menu.style.left = `${event.clientX + window.scrollX}px`;
+  menu.style.top = `${event.clientY + window.scrollY}px`;
+
+  document.addEventListener("click", closeNoteContextMenuFlyoutOnceOutside);
+}
+
+function closeNoteContextMenuFlyoutOnceOutside() {
+  document.getElementById("note-context-menu").style.display = "none";
+  document.removeEventListener("click", closeNoteContextMenuFlyoutOnceOutside);
+}
+
+// Route the clicked menu item to the note it was opened for
+function triggerNoteContextAction(actionKey) {
+  const targetNote = loadedNotesMemory.find((n) => n.id === currentActiveContextNoteId);
+  if (!targetNote) return;
+
+  if (actionKey === "delete") {
+    deleteNote(targetNote.id);
+  } else if (actionKey === "editText") {
+    const updated = prompt("Edit note text:", targetNote.selectedText);
+    if (updated === null) return; // user cancelled
+    const trimmed = updated.trim();
+    if (!trimmed) {
+      alert("Note text can't be empty.");
+      return;
+    }
+    updateNoteFields(targetNote.id, { selectedText: trimmed });
+  } else if (actionKey === "editComment") {
+    const updated = prompt("Edit comment:", targetNote.comment || "");
+    if (updated === null) return; // user cancelled
+    updateNoteFields(targetNote.id, { comment: updated.trim() });
+  } else if (actionKey === "editGroup") {
+    /*
+     Same reasoning as the book library's "Manage Group" action in
+     09-stats-and-context-menu.js: list the real group names/IDs so the
+     prompt is actually answerable instead of asking for a raw DB key
+     the user has no way of knowing.
+    */
+    if (loadedNoteGroupsMemory.length === 0) {
+      alert('No note groups exist yet. Create one first with "🎨 Manage Groups".');
+      return;
+    }
+    const optionsList = loadedNoteGroupsMemory
+      .map((g) => `${g.id}: ${g.name}`)
+      .join("\n");
+    const currentValue = targetNote.groupId != null ? String(targetNote.groupId) : "";
+    const groupIdInput = prompt(
+      `Enter a group ID to move this note into, or leave blank to remove it from its group:\n\n${optionsList}`,
+      currentValue,
+    );
+    if (groupIdInput === null) return; // user cancelled
+    let newGroupId = null;
+    if (groupIdInput.trim() !== "") {
+      const parsed = parseInt(groupIdInput, 10);
+      const matchesRealGroup = loadedNoteGroupsMemory.some((g) => g.id === parsed);
+      if (!matchesRealGroup) {
+        alert("That's not a valid group ID.");
+        return;
+      }
+      newGroupId = parsed;
+    }
+    updateNoteFields(targetNote.id, { groupId: newGroupId });
+  }
+}
+
+// Shared write-path for the single-field edits above
+function updateNoteFields(noteId, changes) {
+  const transaction = db.transaction([STORE_NOTES], "readwrite");
+  const store = transaction.objectStore(STORE_NOTES);
+  store.get(noteId).onsuccess = (e) => {
+    const record = e.target.result;
+    if (record) {
+      Object.assign(record, changes);
+      store.put(record);
+    }
+  };
   transaction.oncomplete = () => fetchNotesLibrary();
 }
 
