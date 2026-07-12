@@ -864,9 +864,10 @@ footer {
 
 .stat-metric-card {
     background: var(--bg-card);
-    padding: 20px;
+    padding: 16px;
     border-radius: 6px;
     border: 1px solid var(--border);
+    box-shadow: 2px 2px 15px rgba(0,0,0,0.2);
 }
 
 .stat-label {
@@ -875,10 +876,11 @@ footer {
 }
 
 .stat-value {
-    font-size: 28px;
+    font-size: 24px;
     font-weight: bold;
     color: var(--accent);
     margin-top: 5px;
+    text-shadow: 2px 2px 6px rgba(0,0,0,0.2);
 }
 
 .stat-value-neutral {
@@ -1444,7 +1446,7 @@ footer {
     }
 
     .stat-value {
-        font-size: 18px;
+        font-size: 16px;
     }
 
     .group-card{

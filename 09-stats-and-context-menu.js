@@ -271,18 +271,20 @@ async function showStatsViewState() {
     
     // Core calculation metrics
     let globalTotalPagesRead = 0;
+    let timedPagesRead = 0;
 
     const tbody = document.getElementById("stats-books-table-body");
     tbody.innerHTML = `<tr><td colspan="4" style="padding:12px; text-align:center; color:var(--text-muted)">Analyzing book files...</td></tr>`;
 
     const rowTemplates = [];
-
+    
     // Loop through memory records dynamically evaluating true content volume
     for (const book of loadedBooksMemory) {
         combinedSecondsTracked += (book.timeSpentSeconds || 0);
         let bookWordCount = 0;
+        
 
-        // --- REUSING YOUR METRICS PARSING LOGIC LOOP ---
+        // --- REUSING METRICS PARSING LOGIC LOOP ---
         try {
             const zip = await JSZip.loadAsync(book.fileData);
             const containerFile = await zip.file("META-INF/container.xml").async("string");
@@ -352,19 +354,23 @@ async function showStatsViewState() {
         globalTotalPagesRead += pagesRead;
 
         const mins = Math.round((book.timeSpentSeconds || 0) / 60);
-
+        const pagesPerHour = mins > 0 ? (pagesRead / mins * 60).toFixed(1) : "—";
+        if (mins > 0) timedPagesRead += pagesRead;
+        
         // Save row layout string reference
         rowTemplates.push(`
-            <tr style="border-bottom: 1px solid var(--border);">
-                <td style="padding:12px;">${escapeHtml(book.title)}</td>
-                <td style="padding:12px; color:var(--accent);">${isRead ? '✅ Completed' : '📖 In Progress'}</td>
-                <td style="padding:12px;">${pagesRead} / ${totalPages} pages</td>
-                <td style="padding:12px;">${mins} minutes</td>
-            </tr>
+        <tr style="border-bottom: 1px solid var(--border);">
+            <td style="padding:12px;">${escapeHtml(book.title)}</td>
+            <td style="padding:12px; color:var(--accent);">${isRead ? "✅ Completed" : "📖 In Progress"}</td>
+            <td style="padding:12px;">${pagesRead} / ${totalPages} pages</td>
+            <td style="padding:12px;">${mins} minutes</td>
+            <td style="padding:12px;">${pagesPerHour === "—" ? "—" : `${pagesPerHour} p/h`}</td>
+        </tr>
         `);
         } catch (e) {
             console.error("Error parsing word counts for stats: ", e);
         }
+        
     }
 
     // Flush table rows inside dashboard
@@ -372,15 +378,17 @@ async function showStatsViewState() {
 
     // --- MATH COMPILATIONS & UI UPDATES ---
     const totalMins = Math.round(combinedSecondsTracked / 60);
-    const avgMins = totalBooksCount > 0 ? Math.round(totalMins / totalBooksCount) : 0;
-
+    const booksWithTime = loadedBooksMemory.filter(b => (b.timeSpentSeconds || 0) > 0).length;
+    const avgMins = booksWithTime ? Math.round(totalMins / booksWithTime) : 0;
+    const avgPagesPerHour = totalMins ? (timedPagesRead / totalMins * 60).toFixed(1): "—";
 
     // Update standard interface element outputs values
     document.getElementById("stat-total-books").innerText = totalBooksCount;
     document.getElementById("stat-read-books").innerText = readBooksCount;
-    document.getElementById("stat-total-time").innerText = `${totalMins}m`;
-    document.getElementById("stat-avg-time").innerText = `${avgMins}m`;
-    
+    document.getElementById("stat-total-time").innerText = formatMinutes(totalMins);
+    document.getElementById("stat-avg-time").innerText = formatMinutes(avgMins);
+    document.getElementById("stat-avg-pages-per-hour").innerText = avgPagesPerHour === "—" ? "—" : `${avgPagesPerHour} p/h`;
+
 
 
     const globalPagesEl = document.getElementById("stat-global-pages");

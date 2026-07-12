@@ -96,7 +96,7 @@
 
         <div class="stats-grid">
             <div class="stat-metric-card">
-                <div class="stat-label">TOTAL BOOKS IN LIBRARY</div>
+                <div class="stat-label">BOOKS IN LIBRARY</div>
                 <div id="stat-total-books" class="stat-value">0</div>
             </div>
             <div class="stat-metric-card">
@@ -113,7 +113,11 @@
             </div>
             <div class="stat-metric-card">
                 <div class="stat-label">TOTAL PAGES READ</div>
-                <div id="stat-global-pages" class="stat-value stat-value-neutral">0</div>
+                <div id="stat-global-pages" class="stat-value">0</div>
+            </div>
+            <div class="stat-metric-card">
+                <div class="stat-label">AVERAGE PAGES PER HOUR</div>
+                <div id="stat-avg-pages-per-hour" class="stat-value">-</div>
             </div>
         </div> <h3 class="section-heading">⏱️ Individual Breakdown Per Book</h3>
         <div class="table-wrapper">
@@ -122,8 +126,9 @@
                     <tr class="table-header-row">
                         <th>Book Title</th>
                         <th>Progress</th>
-                        <th>Time Spent</th>
                         <th>Pages</th>
+                        <th>Time Spent</th>
+                        <th>Pages per Hour</th>
                     </tr>
                 </thead>
                 <tbody id="stats-books-table-body"></tbody>

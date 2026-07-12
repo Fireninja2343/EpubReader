@@ -94,6 +94,12 @@ function base64ToBlob(base64) {
   return new Blob([new Uint8Array(array)], { type: mime });
 }
 
+function formatMinutes(mins) {
+    const h = Math.floor(mins / 60);
+    const m = mins % 60;
+    return h ? `${h}h ${m}m` : `${m}m`;
+}
+
 let enabled = false;
 const AUTOSCROLL_DEBUG = Config.AutoScroller.AUTOSCROLL_DEBUG;
 
