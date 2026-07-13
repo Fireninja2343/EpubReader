@@ -506,9 +506,22 @@ function buildNoteCard(note) {
   // anything the user typed or selected from a book, and none of it should
   // ever be interpreted as markup.
   const quote = document.createElement("blockquote");
-  quote.className = "note-card-quote";
+  quote.className = "note-card-quote collapsed";
   quote.innerText = note.selectedText;
   card.appendChild(quote);
+
+  const toggleButton = document.createElement("button");
+  toggleButton.className = "note-card-expand-btn";
+  toggleButton.innerText = "▼ Show More";
+  toggleButton.onclick = () => toggleNoteCard(quote, toggleButton);
+  card.appendChild(toggleButton);
+
+  // Hide the button if the note isn't actually overflowing.
+  requestAnimationFrame(() => {
+      if (quote.scrollHeight <= quote.clientHeight + 1) {
+          toggleButton.style.display = "none";
+      }
+  });
 
   if (note.comment) {
     const comment = document.createElement("div");
@@ -518,6 +531,14 @@ function buildNoteCard(note) {
   }
 
   return card;
+}
+
+function toggleNoteCard(quoteElement, buttonElement) {
+    quoteElement.classList.toggle("collapsed");
+
+    buttonElement.innerText = quoteElement.classList.contains("collapsed")
+        ? "▼ Show More"
+        : "▲ Show Less";
 }
 
 function deleteNote(noteId) {

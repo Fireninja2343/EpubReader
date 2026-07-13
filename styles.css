@@ -1246,12 +1246,32 @@ footer {
     border-left: 2px solid var(--accent);
     padding-left: 10px;
     color: var(--text-main);
-    /* A single very long "word" (a URL, a run-on token, etc.) would
-       otherwise overflow straight out of the card instead of wrapping like
-       normal space-separated text does. */
     overflow-wrap: break-word;
     word-break: break-word;
     min-width: 0;
+}
+
+.note-card-quote.collapsed {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 4;
+    line-clamp: 4;
+    overflow: hidden;
+}
+
+.note-card-expand-btn {
+    margin-top: 6px;
+    padding: 0;
+    background: none;
+    border: none;
+    color: var(--accent-color);
+    cursor: pointer;
+    font-size: 0.9rem;
+    align-self: flex-start;
+}
+
+.note-card-expand-btn:hover {
+    text-decoration: underline;
 }
 
 .note-card-comment {
