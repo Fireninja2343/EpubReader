@@ -160,7 +160,7 @@ function trackReadingProgress() {
         }
     }
 }
-
+/*
 document.getElementById("reader-container").addEventListener("wheel", (e) => {
   const container = e.currentTarget;
   const isAtBottom =
@@ -173,7 +173,7 @@ document.getElementById("reader-container").addEventListener("wheel", (e) => {
     }
   }
 });
-
+*/
 async function stepToNextChapter() {
   if (activeSpinePointer < activeSpineArray.length - 1) {
     activeSpinePointer++;
