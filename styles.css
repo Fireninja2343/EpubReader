@@ -1171,7 +1171,7 @@ footer {
 
 .notes-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
     gap: 15px;
 }
 
@@ -1249,6 +1249,15 @@ footer {
     overflow-wrap: break-word;
     word-break: break-word;
     min-width: 0;
+    transition: max-height 0.3s ease-in-out;
+    max-height: 800px; 
+    overflow: hidden;
+}
+
+.note-card-quote:not(.collapsed) {
+    display: block; 
+    -webkit-line-clamp: none;
+    line-clamp: none;
 }
 
 .note-card-quote.collapsed {
@@ -1257,6 +1266,8 @@ footer {
     -webkit-line-clamp: 4;
     line-clamp: 4;
     overflow: hidden;
+    max-height: 90px;
+    transition: max-height 0.4s ease-in-out;
 }
 
 .note-card-expand-btn {
@@ -1264,14 +1275,16 @@ footer {
     padding: 0;
     background: none;
     border: none;
-    color: var(--accent-color);
+    color: var(--accent);
     cursor: pointer;
     font-size: 0.9rem;
     align-self: flex-start;
+    transition: transform 0.15s ease-in-out, text-shadow 0.15s ease-in-out;
 }
 
 .note-card-expand-btn:hover {
-    text-decoration: underline;
+    text-shadow: 0 0 10px var(--accent);
+    transform: scale(1.05);
 }
 
 .note-card-comment {
