@@ -265,6 +265,7 @@ async function showStatsViewState() {
     let totalBooksCount = loadedBooksMemory.length;
     let readBooksCount = 0;
     let combinedSecondsTracked = 0;
+    let sessionTime = 0;
 
     // Core calculation metrics
     let globalTotalPagesRead = 0;
@@ -326,6 +327,7 @@ async function showStatsViewState() {
         const mins = Math.round((book.timeSpentSeconds || 0) / 60);
         const pagesPerHour = mins > 0 ? (pagesRead / mins * 60).toFixed(1) : "—";
         if (mins > 0) timedPagesRead += pagesRead;
+        if (book.totalSessions > 0) sessionTime += book.timeSpentSeconds || 0;
 
         // Save row layout string reference
         rowTemplates.push(`
@@ -363,7 +365,7 @@ async function showStatsViewState() {
      short bursts and one opened once for a long sitting should not count
      the same "session" length just because they show similar total time.
     */
-    const avgSessionMins = totalReadingSessions ? Math.round(totalMins / totalReadingSessions) : 0;
+    const avgSessionMins = totalReadingSessions ? Math.round(sessionTime / totalReadingSessions) : 0;
 
     // Update standard interface element outputs values
     document.getElementById("stat-total-books").innerText = totalBooksCount;
