@@ -1139,21 +1139,13 @@ footer {
     padding: 30px 10px;
 }
 
-/*
- Expanded width: a .notes-grid column is minmax(320px, 1fr) with a 15px
- gap (see .notes-grid below), so fitting 2 note cards side by side needs
- 320*2 + 15 = 655px, plus this section's own 15px padding-left and 3px
- border-left = 673px. min-width holds that floor so flex-shrink never
- squeezes a section below "2 notes wide" - if the row doesn't have 673px
- left, the section wraps to its own new line instead of being crushed.
- flex-grow lets it fill any extra space beyond that on a wide screen.
-*/
+
 .note-tag-section {
     border-left: 3px solid var(--tag-tint, var(--border));
     padding-left: 15px;
     box-sizing: border-box;
-    flex: 1 1 673px;
-    min-width: 673px;
+    flex: 1 1 800px;
+    min-width: 600px;
     max-width: 100%;
     transition: all 0.2s ease-in-out;
 }
@@ -1176,9 +1168,9 @@ footer {
 }
 
 .note-tag-section-title {
-    overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+
 }
 
 /*
@@ -1542,13 +1534,9 @@ footer {
         gap: 10px;
     }
 
-    /* Mirrors the desktop .note-tag-section min-width comment above, using
-       this breakpoint's smaller 200px note-card / 10px gap numbers instead:
-       200*2 + 10 = 410, plus the section's own 15px padding-left + 3px
-       border-left = 428px. */
     .note-tag-section {
-        flex-basis: 428px;
-        min-width: 428px;
+        flex-basis: 500px;
+        min-width: 200px;
     }
 }
 
