@@ -256,6 +256,10 @@ const READER_BUTTON_ELEMENT_MAP = {
     stats: "btn-global-stats",
     notes: "btn-global-notes",
     themes: "theme-selector",
+    sort: "sort-selector",
+    viewMode: "library-view-mode",
+    openSelected: "btn-open-book",
+    lastRead: "btn-last-read",
 };
 
 function handleReaderButtonToggle(key, isChecked) {
