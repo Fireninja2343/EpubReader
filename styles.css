@@ -118,10 +118,12 @@ button, label.btn {
     cursor: pointer;
     font-size: 13.5px;
     display: inline-block;
+    transition: all 0.2s ease-in-out;
 }
 
 button:hover, label.btn:hover {
     border-color: var(--accent);
+    transform: scale(1.03);
 }
 
 
@@ -186,7 +188,7 @@ select {
     display: flex;
     flex-direction: column;
     cursor: pointer;
-    transition: transform 0.15s ease, border-color 0.15s ease;
+    transition: all 0.2s ease-in-out;
     position: relative;
 }
 
@@ -268,7 +270,7 @@ select {
     font-size: 14px;
     z-index: 4;
     opacity: 0;
-    transition: opacity 0.15s ease-in-out;
+    transition: all 0.2s ease-in-out;
 }
 
 .book-card:hover .book-action-trigger-dots {
@@ -392,42 +394,40 @@ select {
 }
 
 input[type="range"] {
-  -webkit-appearance: none;  /* Override default CSS styles */
+  -webkit-appearance: none; 
   appearance: none;
-  width: 100%; /* Full-width */
-  height: 16px; /* Specified height */
-  background: var(--bg-card); /* Grey background */
-  outline: none; /* Remove outline */
-  opacity: 0.7; /* Set transparency (for mouse-over effects on hover) */
-  -webkit-transition: .2s; /* 0.2 seconds transition on hover */
+  width: 100%; 
+  height: 16px;
+  background: var(--bg-card);
+  outline: none;
+  opacity: 0.7;
+  -webkit-transition: .2s;
   transition: opacity .2s;
 }
 
-/* Mouse-over effects */
 input[type="range"]:hover {
-  opacity: 1; /* Fully shown on mouse-over */
+  opacity: 1;
 }
 
 input[type="range"]::-webkit-slider-thumb {
-  -webkit-appearance: none; /* Override default look */
+  -webkit-appearance: none;
   appearance: none;
-  width: 16px; /* Set a specific slider handle width */
-  height: 12px; /* Slider handle height */
-  background: var(--accent-dim); /* Green background */
-  cursor: pointer; /* Cursor on hover */
+  width: 16px;
+  height: 12px;
+  background: var(--accent-dim); 
+  cursor: pointer;
   border-radius: 4px;
 }
 input[type="range"]::-webkit-slider-thumb:hover {
     background: var(--accent); 
 }
 input[type="range"]::-moz-range-thumb {
-  width: 16px; /* Set a specific slider handle width */
-  height: 12px; /* Slider handle height */
-  background: var(--accent-dim); /* Green background */
-  cursor: pointer; /* Cursor on hover */
+  width: 16px;
+  height: 12px;
+  background: var(--accent-dim);
+  cursor: pointer;
 }
 
-/* TOC Items Mapped Styles */
 .toc-list-item {
     padding: 8px 10px;
     font-size: 14px;
@@ -436,6 +436,7 @@ input[type="range"]::-moz-range-thumb {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    transition: all 0.2s ease-in-out;
 }
 
 .toc-list-item:hover {
@@ -1111,43 +1112,24 @@ footer {
 }
 
 .notes-toolbar {
-    align-items: flex-start;
-}
-
-.note-tag-filter-row {
     display: flex;
-    flex-wrap: wrap;
-    gap: 10px;
+    justify-content: flex-end;
 }
 
-/* Each filter checkbox gets a small colored dot borrowed from its tag's own
-   color via --tag-tint, so the filter row doubles as a color legend for
-   the sections rendered below it. */
-.note-tag-filter-chip {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    background-color: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: 20px;
-    padding: 5px 12px 5px 8px;
-    font-size: 12.5px;
-    cursor: pointer;
-}
-
-.note-tag-filter-chip::before {
-    content: "";
-    display: block;
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-    background-color: var(--tag-tint, var(--text-muted));
-}
-
+/*
+ Sections used to stack in a single column (flex-direction: column). Now
+ that a collapsed section shrinks down to a thin colored strip instead of
+ disappearing, this is a wrapping row instead: expanded sections claim a
+ wide track, collapsed ones claim a narrow one, and the browser's own
+ flex-wrap packs as many as fit per line - no manual layout math needed.
+ align-items: stretch (the flex default) is what lets a collapsed section
+ stretch to match the row's tallest sibling instead of shrink-wrapping to
+ its own tiny content height.
+*/
 .notes-list-container {
     display: flex;
-    flex-direction: column;
-    gap: 25px;
+    flex-wrap: wrap;
+    gap: 20px;
 }
 
 .notes-empty-state {
@@ -1157,16 +1139,71 @@ footer {
     padding: 30px 10px;
 }
 
+/*
+ Expanded width: a .notes-grid column is minmax(320px, 1fr) with a 15px
+ gap (see .notes-grid below), so fitting 2 note cards side by side needs
+ 320*2 + 15 = 655px, plus this section's own 15px padding-left and 3px
+ border-left = 673px. min-width holds that floor so flex-shrink never
+ squeezes a section below "2 notes wide" - if the row doesn't have 673px
+ left, the section wraps to its own new line instead of being crushed.
+ flex-grow lets it fill any extra space beyond that on a wide screen.
+*/
 .note-tag-section {
     border-left: 3px solid var(--tag-tint, var(--border));
     padding-left: 15px;
+    box-sizing: border-box;
+    flex: 1 1 673px;
+    min-width: 673px;
+    max-width: 100%;
+    transition: all 0.2s ease-in-out;
 }
 
 .note-tag-section-heading {
+    display: flex;
+    align-items: center;
+    gap: 8px;
     font-size: 15px;
     font-weight: 700;
     color: var(--tag-tint, var(--text-main));
     margin-bottom: 12px;
+    transition: all 0.2s ease-in-out;
+}
+
+.note-tag-collapse-toggle {
+    flex-shrink: 0;
+    cursor: pointer;
+    accent-color: var(--tag-tint, var(--accent));
+}
+
+.note-tag-section-title {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/*
+    Collapsed: the section shrinks to just its colored border-left plus a slim ~40px strip holding the checkbox and title
+    flex: 0 0 auto takes it out of the "grow to fill the row" competition entirely,
+    so several collapsed sections naturally packnnext to each other (each claiming only its own ~40px) instead of each
+    grabbing an even share of the row, which is what lets freed-up horizontal space actually get reused by whatever comes after them.
+    writing-mode flips the heading vertical so the title is still readable top-to-bottom without needing the
+    673px an expanded heading has to work with; text-overflow clips a very long name rather than growing the strip.
+*/
+.note-tag-section.collapsed {
+    flex: 0 0 auto;
+    width: 40px;
+    min-width: 0;
+    padding-left: 8px;
+}
+
+.note-tag-section.collapsed .note-tag-section-heading {
+    writing-mode: vertical-rl;
+    margin-bottom: 0;
+    gap: 6px;
+}
+
+.note-tag-section.collapsed .note-tag-section-title {
+    max-height: 220px;
 }
 
 .notes-grid {
@@ -1207,11 +1244,13 @@ footer {
     justify-content: center;
     border-radius: 50%;
     cursor: pointer;
+    transition: all 0.2s ease-in-out;
 }
 
 .note-card-actions-trigger:hover {
     background-color: var(--bg-sidebar);
     color: var(--accent);
+    transform: scale(1.05);
 }
 
 /* Row of tag pills at the top of a note card - the automatic book tag (if
@@ -1501,6 +1540,15 @@ footer {
     .notes-grid {
         grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
         gap: 10px;
+    }
+
+    /* Mirrors the desktop .note-tag-section min-width comment above, using
+       this breakpoint's smaller 200px note-card / 10px gap numbers instead:
+       200*2 + 10 = 410, plus the section's own 15px padding-left + 3px
+       border-left = 428px. */
+    .note-tag-section {
+        flex-basis: 428px;
+        min-width: 428px;
     }
 }
 

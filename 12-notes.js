@@ -25,21 +25,46 @@ let loadedNotesMemory = [];
 let loadedNoteTagsMemory = [];
 
 /*
- Keys the user has explicitly hidden via the tag filter checkboxes on the
- Notes page. An empty set means "show everything" - this is deliberately
- the inverse of a "visible" set so that newly created tags show up
- checked/visible by default without any extra bookkeeping.
- "none" is the reserved key for the untagged bucket. Book auto-tags use the
- key `book:<bookId>` so they can't collide with real tag ids.
+ Keys of the tag sections the user has collapsed on the Notes page. An
+ empty set means "show everything expanded" - this is deliberately the
+ inverse of an "expanded" set so that newly created tags (and the "All
+ Notes" section) start out expanded by default without any extra
+ bookkeeping. "none" is the reserved key for the untagged bucket, "all" is
+ the reserved key for the All Notes section. Book auto-tags use the key
+ `book:<bookId>` so they can't collide with real tag ids.
+
+ Persisted to localStorage (see load/saveCollapsedNoteTagKeys below) so a
+ user's collapse layout survives reloads instead of resetting to fully
+ expanded every time the Notes page is opened.
 */
-let hiddenNoteTagKeys = new Set();
+const COLLAPSED_NOTE_TAG_KEYS_STORAGE_KEY = Config.Db.COLLAPSED_NOTE_TAG_KEYS_STORAGE_KEY;
+
+function loadCollapsedNoteTagKeys() {
+  const raw = localStorage.getItem(COLLAPSED_NOTE_TAG_KEYS_STORAGE_KEY);
+  if (!raw) return new Set();
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? new Set(parsed) : new Set();
+  } catch (e) {
+    return new Set();
+  }
+}
+
+function saveCollapsedNoteTagKeys() {
+  localStorage.setItem(
+    COLLAPSED_NOTE_TAG_KEYS_STORAGE_KEY,
+    JSON.stringify(Array.from(collapsedNoteTagKeys)),
+  );
+}
+
+let collapsedNoteTagKeys = loadCollapsedNoteTagKeys();
 
 let noteSelectionButton = null;
 let noteEditorBookContext = { bookId: null, bookTitle: null };
 let noteEditorEditingNoteId = null; // null while creating; set to a note id while editing that note
 let noteTagPickerNoteId = null; // which note "Move Note (Tag)" is currently acting on
 
-const LAST_NOTE_TAGS_STORAGE_KEY = "EpubReader_LastNoteTagIds_v1";
+const LAST_NOTE_TAGS_STORAGE_KEY = Config.Db.LAST_NOTE_TAGS_STORAGE_KEY;
 
 // -----------------------------------------------------------------
 // DATABASE LOAD / REFRESH
@@ -322,7 +347,6 @@ function saveLastUsedNoteTagIds(tagIds) {
 // NOTES PAGE: TAG FILTER CHIPS + TAG-SECTIONED NOTE LIST
 // -----------------------------------------------------------------
 function renderNotesPage() {
-  renderNoteTagFilterRow();
   renderNotesList();
 }
 
@@ -348,44 +372,6 @@ function collectBookAutoTags() {
   return Array.from(byKey.values());
 }
 
-function renderNoteTagFilterRow() {
-  const container = document.getElementById("note-tag-filter-row");
-  container.innerHTML = "";
-
-  container.appendChild(buildNoteTagFilterChip("none", "Untagged", null));
-  loadedNoteTagsMemory.forEach((tag) => {
-    container.appendChild(buildNoteTagFilterChip(tag.id, tag.name, tag.color));
-  });
-  collectBookAutoTags().forEach((bookTag) => {
-    container.appendChild(buildNoteTagFilterChip(bookTag.key, `📖 ${bookTag.name}`, bookTag.color));
-  });
-}
-
-function buildNoteTagFilterChip(key, labelText, color) {
-  const label = document.createElement("label");
-  label.className = "note-tag-filter-chip";
-  if (color) label.style.setProperty("--tag-tint", color);
-
-  const checkbox = document.createElement("input");
-  checkbox.type = "checkbox";
-  checkbox.checked = !hiddenNoteTagKeys.has(key);
-  checkbox.onchange = () => {
-    if (checkbox.checked) {
-      hiddenNoteTagKeys.delete(key);
-    } else {
-      hiddenNoteTagKeys.add(key);
-    }
-    renderNotesList();
-  };
-
-  const span = document.createElement("span");
-  span.innerText = labelText;
-
-  label.appendChild(checkbox);
-  label.appendChild(span);
-  return label;
-}
-
 // Returns every tag key that applies to a note: its manual tagIds, plus its
 // derived book auto-tag key if it has a linked book. A note with neither
 // falls into the "none" (untagged) bucket.
@@ -404,15 +390,17 @@ function renderNotesList() {
     return;
   }
 
+  // "All Notes" is a pinned catch-all shown first, containing every note
+  // regardless of tag - unlike the sections below it, it's never populated
+  // by keysForNote() and always holds the full library of notes.
+  const sections = [{ key: "all", name: "All Notes", color: null, notes: loadedNotesMemory.slice() }];
+
   // One section per real tag, one per distinct book auto-tag, plus a
   // trailing "Untagged" catch-all. A note with several tags appears in
   // every section it belongs to.
-  const sections = loadedNoteTagsMemory.map((t) => ({
-    key: t.id,
-    name: t.name,
-    color: t.color,
-    notes: [],
-  }));
+  loadedNoteTagsMemory.forEach((t) => {
+    sections.push({ key: t.id, name: t.name, color: t.color, notes: [] });
+  });
   collectBookAutoTags().forEach((bookTag) => {
     sections.push({ key: bookTag.key, name: `📖 ${bookTag.name}`, color: bookTag.color, notes: [] });
   });
@@ -425,36 +413,68 @@ function renderNotesList() {
     });
   });
 
-  let renderedAnything = false;
   sections.forEach((section) => {
-    if (hiddenNoteTagKeys.has(section.key) || section.notes.length === 0) return;
-    renderedAnything = true;
+    if (section.notes.length === 0) return;
     container.appendChild(buildNoteTagSection(section));
   });
-
-  if (!renderedAnything) {
-    container.innerHTML = `<div class="notes-empty-state">No notes match the current tag filters.</div>`;
-  }
 }
 
 function buildNoteTagSection(section) {
+  const isCollapsed = collapsedNoteTagKeys.has(section.key);
+
   const wrapper = document.createElement("div");
-  wrapper.className = "note-tag-section";
+  wrapper.className = "note-tag-section" + (isCollapsed ? " collapsed" : "");
   if (section.color) wrapper.style.setProperty("--tag-tint", section.color);
 
   const heading = document.createElement("div");
   heading.className = "note-tag-section-heading";
-  heading.innerText = section.name;
+
+  /*
+   This checkbox is the section's only control, doubling as both the
+   visual "is this expanded" indicator and the click target - no separate
+   button is layered on top of it. Checked means expanded (mirrors the
+   ▼ Show More / ▲ Show Less convention used on note cards elsewhere in
+   this file), so a brand new tag with no stored preference starts
+   expanded by default with zero extra bookkeeping.
+  */
+  const checkbox = document.createElement("input");
+  checkbox.type = "checkbox";
+  checkbox.className = "note-tag-collapse-toggle";
+  checkbox.checked = !isCollapsed;
+  checkbox.title = isCollapsed ? "Expand section" : "Collapse section";
+  checkbox.onchange = () => {
+    if (checkbox.checked) {
+      collapsedNoteTagKeys.delete(section.key);
+    } else {
+      collapsedNoteTagKeys.add(section.key);
+    }
+    saveCollapsedNoteTagKeys();
+    renderNotesList();
+  };
+
+  const title = document.createElement("span");
+  title.className = "note-tag-section-title";
+  title.innerText = section.name;
+
+  heading.appendChild(checkbox);
+  heading.appendChild(title);
   wrapper.appendChild(heading);
 
-  const grid = document.createElement("div");
-  grid.className = "notes-grid";
-  section.notes
-    .slice()
-    .sort((a, b) => (b.dateCreated || 0) - (a.dateCreated || 0))
-    .forEach((note) => grid.appendChild(buildNoteCard(note)));
+  // While collapsed the section is just its colored line + heading -
+  // the notes grid isn't rendered at all (rather than rendered and
+  // hidden via CSS), so a collapsed section with hundreds of notes costs
+  // nothing to keep around.
+  if (!isCollapsed) {
+    const grid = document.createElement("div");
+    grid.className = "notes-grid";
+    section.notes
+      .slice()
+      .sort((a, b) => (b.dateCreated || 0) - (a.dateCreated || 0))
+      .forEach((note) => grid.appendChild(buildNoteCard(note)));
 
-  wrapper.appendChild(grid);
+    wrapper.appendChild(grid);
+  }
+
   return wrapper;
 }
 
