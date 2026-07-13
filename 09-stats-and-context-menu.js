@@ -13,43 +13,81 @@ window.addEventListener("blur", stopActiveReadingTimer);
 document.addEventListener("visibilitychange", () => {
     if (document.hidden) {
         stopActiveReadingTimer();
+        saveTimeToDB(); // Flush the exact trailing seconds before the tab goes away
     } else if (document.hasFocus()) {
         startActiveReadingTimer();
     }
 });
+
+// Extra insurance for desktop users closing the tab outright rather than
+// switching away from it - visibilitychange covers the switch-away case above,
+// this covers the close-outright case that visibilitychange isn't guaranteed to catch.
+window.addEventListener("beforeunload", () => {
+    saveTimeToDB();
+});
+
+const IDLE_THRESHOLD_MS = Config.Sync.IDLE_THRESHOLD_MS;
+// If no user activity is detected for this long, the tab is considered "abandoned" and time tracking pauses
+
+const DB_UPDATE_FREQUENCY = Config.Sync.CLOUD_PROGRESS_PUSH_INTERVAL_MS / 1000;
+const TICK_MS = 2000;
+
+let lastActivityTime = Date.now();
+
+// Tracks physical user activity or autoscroller movement, so the timer below
+// can tell "tab focused and visible" apart from "tab focused, visible, and abandoned"
+function recordUserActivity() {
+    lastActivityTime = Date.now();
+}
+window.addEventListener("mousemove", recordUserActivity);
+window.addEventListener("keydown", recordUserActivity);
+// If the autoscroller scrolls a different element than this, update the id below to match
+document.getElementById("reader-container")?.addEventListener("scroll", recordUserActivity);
 
 function startActiveReadingTimer() {
     if (focusedTimeTrackerHeartbeatInterval) return;
     focusedTimeTrackerHeartbeatInterval = setInterval(() => {
         // Condition: Must be inside a book workspace layer, and tab window must be active focus target
         const readerActive = document.getElementById("reader-view").classList.contains("active");
-        if (readerActive && activeBookObject && document.hasFocus() && !document.hidden) {
+        const isUserActive = (Date.now() - lastActivityTime) < IDLE_THRESHOLD_MS;
+        if (readerActive && activeBookObject && document.hasFocus() && !document.hidden && isUserActive) {
             if (!activeBookObject.timeSpentSeconds) activeBookObject.timeSpentSeconds = 0;
-            activeBookObject.timeSpentSeconds += 2; // Increments ticker loop heartbeat frequency step bounds
+            activeBookObject.timeSpentSeconds += (TICK_MS / 1000); // Increments ticker loop heartbeat frequency step bounds
 
             /*
-             activeBookObject is already the in-memory source of truth and was
-             just incremented above, so the record can be written directly
-             instead of doing a separate get() + re-incrementing a second
-             counter - that was duplicating the same +2 in two places that
-             only stayed in sync by coincidence.
+             Batches the DB write to every 30 seconds (15 ticks) instead of every
+             tick, to cut down on disk I/O. activeBookObject in RAM stays perfectly
+             accurate every tick regardless - only the persisted copy lags behind,
+             and the visibilitychange/beforeunload handlers above flush the
+             trailing remainder so nothing gets lost when the tab hides or closes.
             */
-            const transaction = db.transaction([STORE_BOOKS], "readwrite");
-            const store = transaction.objectStore(STORE_BOOKS);
-            store.get(activeBookObject.id).onsuccess = (e) => {
-                const record = e.target.result;
-                if (record) {
-                    record.timeSpentSeconds = activeBookObject.timeSpentSeconds;
-                    store.put(record);
-                }
-            };
+            if (activeBookObject.timeSpentSeconds % DB_UPDATE_FREQUENCY === 0) {
+                saveTimeToDB();
+            }
         }
-    }, 2000);
+    }, TICK_MS);
 }
 
 function stopActiveReadingTimer() {
     clearInterval(focusedTimeTrackerHeartbeatInterval);
     focusedTimeTrackerHeartbeatInterval = null;
+}
+
+// Writes the in-memory timeSpentSeconds value to the book's DB record. Pulled
+// out as its own function so the batched ticker and the hide/close safety
+// nets above all go through the exact same save path.
+function saveTimeToDB() {
+    if (!activeBookObject || !activeBookObject.id) return;
+
+    const transaction = db.transaction([Config.Db.STORE_BOOKS], "readwrite");
+    const store = transaction.objectStore(Config.Db.STORE_BOOKS);
+    store.get(activeBookObject.id).onsuccess = (e) => {
+        const record = e.target.result;
+        if (record) {
+            record.timeSpentSeconds = activeBookObject.timeSpentSeconds;
+            store.put(record);
+        }
+    };
 }
 
 // =================================================================
@@ -83,8 +121,8 @@ function triggerContextAction(actionKey) {
 
     if (actionKey === 'delete') {
         if (confirm(`Remove "${targetBookObj.title}" from library completely?`)) {
-            const transaction = db.transaction([STORE_BOOKS], "readwrite");
-            transaction.objectStore(STORE_BOOKS).delete(targetBookObj.id);
+            const transaction = db.transaction([Config.Db.STORE_BOOKS], "readwrite");
+            transaction.objectStore(Config.Db.STORE_BOOKS).delete(targetBookObj.id);
             transaction.oncomplete = () => {
                 fetchLocalLibrary();
                 /* Mirror the deletion up to Firestore too. Without this call the
@@ -97,8 +135,8 @@ function triggerContextAction(actionKey) {
             };
         }
     } else if (actionKey === 'toggleRead') {
-        const transaction = db.transaction([STORE_BOOKS], "readwrite");
-        const store = transaction.objectStore(STORE_BOOKS);
+        const transaction = db.transaction([Config.Db.STORE_BOOKS], "readwrite");
+        const store = transaction.objectStore(Config.Db.STORE_BOOKS);
         let updatedRecord = null;
         store.get(targetBookObj.id).onsuccess = (e) => {
             const r = e.target.result;
@@ -151,8 +189,8 @@ function triggerContextAction(actionKey) {
             }
             newGroupId = parsed;
         }
-        const transaction = db.transaction([STORE_BOOKS], "readwrite");
-        const store = transaction.objectStore(STORE_BOOKS);
+        const transaction = db.transaction([Config.Db.STORE_BOOKS], "readwrite");
+        const store = transaction.objectStore(Config.Db.STORE_BOOKS);
         let updatedRecord = null;
         store.get(targetBookObj.id).onsuccess = (e) => {
             const r = e.target.result;
