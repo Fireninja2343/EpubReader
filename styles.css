@@ -1157,6 +1157,7 @@ footer {
     font-size: 15px;
     font-weight: 700;
     color: var(--tag-tint, var(--text-main));
+    text-shadow: 0 0 3px rgba(255,255,255,0.15);
     margin-bottom: 12px;
     transition: all 0.2s ease-in-out;
 }
@@ -1168,9 +1169,9 @@ footer {
 }
 
 .note-tag-section-title {
+    overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-
 }
 
 /*
