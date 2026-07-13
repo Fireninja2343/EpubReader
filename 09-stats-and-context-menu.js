@@ -327,7 +327,7 @@ async function showStatsViewState() {
         const mins = Math.round((book.timeSpentSeconds || 0) / 60);
         const pagesPerHour = mins > 0 ? (pagesRead / mins * 60).toFixed(1) : "—";
         if (mins > 0) timedPagesRead += pagesRead;
-        if (book.totalSessions > 0) sessionTime += book.timeSpentSeconds || 0;
+        if (book.totalSessions > 0) sessionTime += book.timeSpentSeconds/60 || 0;
 
         // Save row layout string reference
         rowTemplates.push(`
