@@ -5,6 +5,7 @@ const Config = {
     STORE_GROUPS: "groups",
     STORE_NOTES: "notes",
     STORE_NOTE_GROUPS: "noteGroups",
+    STORE_EXTERNAL_STATS: "externalStats",
     COLLAPSED_NOTE_TAG_KEYS_STORAGE_KEY: "EpubReader_CollapsedNoteTagKeys_v1",
     LAST_NOTE_TAGS_STORAGE_KEY: "EpubReader_LastNoteTagIds_v1",
   },

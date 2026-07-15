@@ -3,11 +3,13 @@
 // -----------------------------------------------------------------
 function initIndexedDB() {
   /*
-   Bumped from 1 to 2 to add the notes/noteGroups stores below. Existing
-   users on version 1 will have onupgradeneeded fire once, which only adds
-   the two new stores and leaves books/groups (and their data) untouched.
+   Bumped from 2 to 3 to add the externalStats store below, used for
+   archived reading history imported independently from the local library.
+   Existing users on version 1 or 2 will have onupgradeneeded fire once,
+   which only adds whichever stores are missing and leaves books/groups
+   (and their data) untouched.
   */
-  const request = indexedDB.open(DB_NAME, 2);
+  const request = indexedDB.open(DB_NAME, 3);
   request.onupgradeneeded = (e) => {
     const database = e.target.result;
     if (!database.objectStoreNames.contains(STORE_BOOKS)) {
@@ -30,6 +32,17 @@ function initIndexedDB() {
     }
     if (!database.objectStoreNames.contains(STORE_NOTE_GROUPS)) {
       database.createObjectStore(STORE_NOTE_GROUPS, {
+        keyPath: "id",
+        autoIncrement: true,
+      });
+    }
+    /*
+     Archive-only store: imported reading history that must never be merged
+     into or overwrite STORE_BOOKS. localBookLinkId is reserved for a future
+     linking feature and stays null until that's implemented.
+    */
+    if (!database.objectStoreNames.contains(STORE_EXTERNAL_STATS)) {
+      database.createObjectStore(STORE_EXTERNAL_STATS, {
         keyPath: "id",
         autoIncrement: true,
       });
@@ -84,10 +97,371 @@ function fetchLocalLibrary() {
   };
 }
 
-// Returns a Promise that resolves only once the book has actually been
-// written to IndexedDB (previously this function returned nothing, so
-// handleFileImport()'s "await saveBookToDatabase(...)" was never really
-// waiting for anything — see the fix in 06-epub-reader.js).
+/*
+ Loads the archive store (imported reading-history records) into its own
+ in-memory cache, mirroring fetchLocalLibrary()'s pattern for
+ loadedBooksMemory/loadedGroupsMemory above. This is intentionally kept
+ separate from loadedBooksMemory and never merged with it, since archive
+ data must never overwrite or blend with the local library.
+*/
+function fetchExternalStatsLibrary() {
+  return new Promise((resolve) => {
+    const transaction = db.transaction([STORE_EXTERNAL_STATS], "readonly");
+    const store = transaction.objectStore(STORE_EXTERNAL_STATS);
+    const request = store.getAll();
+    request.onsuccess = () => {
+      loadedExternalStatsMemory = request.result;
+      resolve(loadedExternalStatsMemory);
+    };
+    request.onerror = () => resolve(loadedExternalStatsMemory);
+  });
+}
+
+/*
+ The archive CSV format is fixed (see importExternalCSVStats() below); this
+ is a small local parser rather than a shared util, since titles/authors
+ can contain commas and quoted fields, and no CSV library already exists
+ in this codebase. Handles quoted fields, embedded commas, and escaped
+ double-quotes ("") inside quoted fields per standard CSV escaping.
+*/
+function parseCSVIntoRows(csvText) {
+  const rows = [];
+  let row = [];
+  let field = "";
+  let insideQuotes = false;
+
+  for (let i = 0; i < csvText.length; i++) {
+    const char = csvText[i];
+    const nextChar = csvText[i + 1];
+
+    if (insideQuotes) {
+      if (char === '"' && nextChar === '"') {
+        field += '"';
+        i++;
+      } else if (char === '"') {
+        insideQuotes = false;
+      } else {
+        field += char;
+      }
+    } else {
+      if (char === '"') {
+        insideQuotes = true;
+      } else if (char === ",") {
+        row.push(field);
+        field = "";
+      } else if (char === "\r") {
+        // Skip; \n (handled below) marks the actual row boundary
+      } else if (char === "\n") {
+        row.push(field);
+        rows.push(row);
+        row = [];
+        field = "";
+      } else {
+        field += char;
+      }
+    }
+  }
+  // Final field/row if the file doesn't end with a trailing newline
+  if (field.length > 0 || row.length > 0) {
+    row.push(field);
+    rows.push(row);
+  }
+
+  return rows;
+}
+
+/*
+ Fixed header order expected in the archive CSV export. Validated against
+ the file's actual header row in importExternalCSVStats() below.
+*/
+const EXTERNAL_CSV_EXPECTED_HEADERS = [
+  "Title",
+  "Read Status",
+  "Date Added",
+  "Authors",
+  "Date Started",
+  "Date Ended",
+  "Star Rating",
+  "Number of Pages",
+];
+
+/*
+ Imports an external reading-history CSV into STORE_EXTERNAL_STATS,
+ replacing whatever archive data was previously imported (this store is
+ wiped and repopulated, not appended to or diffed against). This never
+ touches STORE_BOOKS, so the local library is untouched either way.
+
+ Deliberately isolated to importing + loading: no linking to local books
+ (localBookLinkId is always left null here) and no cloud sync of any kind.
+*/
+function importExternalCSVStats(csvText) {
+  const rows = parseCSVIntoRows(csvText).filter((r) => !(r.length === 1 && r[0].trim() === ""));
+  if (rows.length === 0) {
+    return Promise.reject(new Error("CSV file is empty."));
+  }
+
+  const headerRow = rows[0].map((h) => h.trim());
+  const headersMatch =
+    headerRow.length === EXTERNAL_CSV_EXPECTED_HEADERS.length &&
+    EXTERNAL_CSV_EXPECTED_HEADERS.every((expected) => headerRow.includes(expected));
+  if (!headersMatch) {
+    return Promise.reject(
+      new Error(
+        `CSV headers do not match the expected format. Expected: ${EXTERNAL_CSV_EXPECTED_HEADERS.join(", ")}`,
+      ),
+    );
+  }
+
+  // Map header name -> column index, so column order in the file doesn't matter
+  const columnIndex = {};
+  EXTERNAL_CSV_EXPECTED_HEADERS.forEach((headerName) => {
+    columnIndex[headerName] = headerRow.indexOf(headerName);
+  });
+
+  const dataRows = rows.slice(1);
+
+  const toNullableString = (value) => {
+    const trimmed = (value || "").trim();
+    return trimmed === "" ? null : trimmed;
+  };
+  const toNullableNumber = (value) => {
+    const trimmed = (value || "").trim();
+    if (trimmed === "") return null;
+    const parsed = Number(trimmed);
+    return Number.isNaN(parsed) ? null : parsed;
+  };
+
+  const parsedEntries = [];
+  for (const cols of dataRows) {
+    // Skip fully empty rows (e.g. trailing blank lines in the file)
+    const isEmptyRow = cols.every((c) => c.trim() === "");
+    if (isEmptyRow) continue;
+
+    parsedEntries.push({
+      title: toNullableString(cols[columnIndex["Title"]]),
+      readStatus: toNullableString(cols[columnIndex["Read Status"]]),
+      dateAdded: toNullableString(cols[columnIndex["Date Added"]]),
+      authors: toNullableString(cols[columnIndex["Authors"]]),
+      dateStarted: toNullableString(cols[columnIndex["Date Started"]]),
+      dateEnded: toNullableString(cols[columnIndex["Date Ended"]]),
+      starRating: toNullableNumber(cols[columnIndex["Star Rating"]]),
+      numberOfPages: toNullableNumber(cols[columnIndex["Number of Pages"]]),
+      /* Reserved for a future linking feature; never populated by import. */
+      localBookLinkId: null,
+    });
+  }
+
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction([STORE_EXTERNAL_STATS], "readwrite");
+    const store = transaction.objectStore(STORE_EXTERNAL_STATS);
+
+    // Replace, not append: wipe whatever was previously imported first.
+    store.clear().onsuccess = () => {
+      parsedEntries.forEach((entry) => store.add(entry));
+    };
+
+    transaction.oncomplete = async () => {
+      // Reload the in-memory archive cache using the same loading pattern
+      // used for the local library above.
+      await fetchExternalStatsLibrary();
+      // Refresh the stats page via its existing refresh mechanism, if present.
+      if (typeof refreshStatsPage === "function") {
+        refreshStatsPage();
+      }
+      resolve(loadedExternalStatsMemory);
+    };
+    transaction.onerror = (e) => reject(e.target.error);
+  });
+}
+
+/*
+ -----------------------------------------------------------------
+ LOCAL BOOK <-> ARCHIVE ENTRY LINKING
+
+ The local library (STORE_BOOKS) and the imported archive
+ (STORE_EXTERNAL_STATS) remain fully independent stores. Linking only ever
+ writes a pair of id references (externalLinkId / localBookLinkId) between
+ them - never page counts, ratings, reading statistics, or dates - unless a
+ caller explicitly opts in via the copyOptions flags below, all of which
+ default to false.
+ -----------------------------------------------------------------
+*/
+
+/*
+ Links a local book with an archive entry: writes archiveId onto the local
+ book's externalLinkId and bookId onto the archive entry's localBookLinkId.
+ Both writes happen inside a single IndexedDB transaction spanning both
+ stores, so the link is written to both sides together or not at all.
+
+ copyOptions lets a caller opt in to copying specific fields from the local
+ book into the archive entry at link time; every flag defaults to false, and
+ nothing is copied unless the corresponding flag is explicitly true. Field
+ mapping (schemas don't line up 1:1 between the two stores):
+  - copyPageCount: local totalPages -> archive numberOfPages
+  - copyRating: local books have no rating field today, so this is a no-op
+    reserved for if/when one is added
+  - copyReadingStats: local firstOpened -> archive dateStarted
+  - copyDates: local dateImported -> archive dateAdded (only if dateAdded is
+    currently empty, so an existing imported date isn't overwritten), and
+    local completedDate -> archive dateEnded
+*/
+function linkLocalBookWithArchiveEntry(bookId, archiveId, copyOptions = {}) {
+  if (!bookId || !archiveId || !db) return Promise.resolve();
+
+  const {
+    copyPageCount = false,
+    copyRating = false,
+    copyReadingStats = false,
+    copyDates = false,
+  } = copyOptions;
+
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction([STORE_BOOKS, STORE_EXTERNAL_STATS], "readwrite");
+    const booksStore = transaction.objectStore(STORE_BOOKS);
+    const archiveStore = transaction.objectStore(STORE_EXTERNAL_STATS);
+
+    booksStore.get(bookId).onsuccess = (e) => {
+      const bookRecord = e.target.result;
+      if (!bookRecord) return;
+
+      archiveStore.get(archiveId).onsuccess = (e2) => {
+        const archiveRecord = e2.target.result;
+        if (!archiveRecord) return;
+
+        bookRecord.externalLinkId = archiveId;
+        bookRecord.lastModified = new Date().getTime();
+        archiveRecord.localBookLinkId = bookId;
+
+        if (copyPageCount && bookRecord.totalPages != null) {
+          archiveRecord.numberOfPages = bookRecord.totalPages;
+        }
+        if (copyRating) {
+          // No-op: local books have no rating field to copy from today.
+        }
+        if (copyReadingStats && bookRecord.firstOpened != null) {
+          archiveRecord.dateStarted = bookRecord.firstOpened;
+        }
+        if (copyDates) {
+          if (bookRecord.dateImported != null && !archiveRecord.dateAdded) {
+            archiveRecord.dateAdded = bookRecord.dateImported;
+          }
+          if (bookRecord.completedDate != null) {
+            archiveRecord.dateEnded = bookRecord.completedDate;
+          }
+        }
+
+        booksStore.put(bookRecord);
+        archiveStore.put(archiveRecord);
+
+        if (activeBookObject && activeBookObject.id === bookId) {
+          activeBookObject.externalLinkId = archiveId;
+        }
+      };
+    };
+
+    transaction.oncomplete = async () => {
+      // Reuse the existing loading helpers so both in-memory caches reflect
+      // the new link right away.
+      await fetchLocalLibrary();
+      await fetchExternalStatsLibrary();
+      resolve();
+    };
+    transaction.onerror = (e) => reject(e.target.error);
+  });
+}
+
+/*
+ Removes the link between a local book and an archive entry from both
+ sides, in a single transaction (same atomicity guarantee as
+ linkLocalBookWithArchiveEntry() above). Only clears the link fields, and
+ only if they actually still point at each other; nothing else on either
+ record is touched.
+*/
+function unlinkLocalBookAndArchiveEntry(bookId, archiveId) {
+  if (!bookId || !archiveId || !db) return Promise.resolve();
+
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction([STORE_BOOKS, STORE_EXTERNAL_STATS], "readwrite");
+    const booksStore = transaction.objectStore(STORE_BOOKS);
+    const archiveStore = transaction.objectStore(STORE_EXTERNAL_STATS);
+
+    booksStore.get(bookId).onsuccess = (e) => {
+      const bookRecord = e.target.result;
+      if (bookRecord && bookRecord.externalLinkId === archiveId) {
+        bookRecord.externalLinkId = null;
+        bookRecord.lastModified = new Date().getTime();
+        booksStore.put(bookRecord);
+        if (activeBookObject && activeBookObject.id === bookId) {
+          activeBookObject.externalLinkId = null;
+        }
+      }
+    };
+
+    archiveStore.get(archiveId).onsuccess = (e) => {
+      const archiveRecord = e.target.result;
+      if (archiveRecord && archiveRecord.localBookLinkId === bookId) {
+        archiveRecord.localBookLinkId = null;
+        archiveStore.put(archiveRecord);
+      }
+    };
+
+    transaction.oncomplete = async () => {
+      await fetchLocalLibrary();
+      await fetchExternalStatsLibrary();
+      resolve();
+    };
+    transaction.onerror = (e) => reject(e.target.error);
+  });
+}
+
+/*
+ Creates a brand-new archive record from an existing local book. Per the
+ "never copy stats" rule above, only title and authors are copied over -
+ no page counts, ratings, reading stats, or dates. Status is set to
+ "currently-reading" since spinning up a fresh archive record from a book
+ implies the user is currently reading it. The new record is immediately
+ linked back to the source book via linkLocalBookWithArchiveEntry() above,
+ with no copyOptions passed, so no other fields cross over at link time
+ either.
+*/
+function createArchiveEntryFromLocalBook(bookId) {
+  if (!bookId || !db) return Promise.resolve(null);
+
+  return new Promise((resolve, reject) => {
+    const readTransaction = db.transaction([STORE_BOOKS], "readonly");
+    readTransaction.objectStore(STORE_BOOKS).get(bookId).onsuccess = (e) => {
+      const bookRecord = e.target.result;
+      if (!bookRecord) {
+        resolve(null);
+        return;
+      }
+
+      const writeTransaction = db.transaction([STORE_EXTERNAL_STATS], "readwrite");
+      const archiveStore = writeTransaction.objectStore(STORE_EXTERNAL_STATS);
+      const newEntry = {
+        title: bookRecord.title ?? null,
+        // Local books have no authors field today; left null until one exists.
+        authors: bookRecord.authors ?? null,
+        readStatus: "currently-reading",
+        dateAdded: null,
+        dateStarted: null,
+        dateEnded: null,
+        starRating: null,
+        numberOfPages: null,
+        localBookLinkId: null,
+      };
+
+      archiveStore.add(newEntry).onsuccess = (e2) => {
+        const newArchiveId = e2.target.result;
+        linkLocalBookWithArchiveEntry(bookId, newArchiveId).then(() => resolve(newArchiveId));
+      };
+      writeTransaction.onerror = (e2) => reject(e2.target.error);
+    };
+    readTransaction.onerror = (e) => reject(e.target.error);
+  });
+}
+
+
 function saveBookToDatabase(title, coverData, binaryData, analysisMeta = {}) {
   return new Promise((resolve) => {
     const transaction = db.transaction([STORE_BOOKS], "readwrite");
@@ -122,6 +496,7 @@ function saveBookToDatabase(title, coverData, binaryData, analysisMeta = {}) {
       lastOpened: null,
       completedDate: null,
       totalSessions: 0,
+      externalLinkId: null,
     };
     store.add(entry).onsuccess = (e) => {
       const newId = e.target.result;
@@ -196,11 +571,21 @@ function updateBookProgressInDB(bookId, spinePointer, scrollPosition, forceImmed
  scrolled to the bottom of the last chapter, so books don't stay stuck at
  "In Progress" just because the user never opened the context menu to
  toggle read status manually.
+
+ If this book is linked to an archive entry (externalLinkId set), the
+ completion is mirrored onto that archive record too: readStatus becomes
+ "read", and dateEnded is filled in with the same completedDate timestamp
+ only if it was previously empty, so a real completion date already
+ present in the imported archive data isn't overwritten. Only these two
+ fields are synchronized - no page counts, ratings, or anything else
+ crosses over, per the "stores stay independent" rule used throughout the
+ rest of this file's linking helpers.
 */
 function markBookAsRead(bookId) {
   if (!bookId || !db) return;
-  const transaction = db.transaction([STORE_BOOKS], "readwrite");
+  const transaction = db.transaction([STORE_BOOKS, STORE_EXTERNAL_STATS], "readwrite");
   const store = transaction.objectStore(STORE_BOOKS);
+  const archiveStore = transaction.objectStore(STORE_EXTERNAL_STATS);
   store.get(bookId).onsuccess = (e) => {
     const record = e.target.result;
     if (record && !record.isRead) {
@@ -215,7 +600,25 @@ function markBookAsRead(bookId) {
       if (typeof pushBookMetadataToCloud === "function") {
         pushBookMetadataToCloud(record);
       }
+
+      if (record.externalLinkId) {
+        archiveStore.get(record.externalLinkId).onsuccess = (e2) => {
+          const archiveRecord = e2.target.result;
+          if (archiveRecord) {
+            archiveRecord.readStatus = "read";
+            if (!archiveRecord.dateEnded) {
+              archiveRecord.dateEnded = record.completedDate;
+            }
+            archiveStore.put(archiveRecord);
+          }
+        };
+      }
     }
+  };
+  transaction.oncomplete = () => {
+    // Reuse the existing archive loading helper so loadedExternalStatsMemory
+    // reflects the synced status right away.
+    fetchExternalStatsLibrary();
   };
 }
 

@@ -278,6 +278,54 @@ async function openBookDiagnosticsModal(bookObj, modeType) {
 }
 
 // =================================================================
+// STATS VIEW DATASET LAYOUT SWITCHER (split view <-> tab view)
+// =================================================================
+/*
+ Pure layout toggle: swaps which mode class is on #stats-view, which is all
+ the CSS in styles.css needs to switch between showing the local-library and
+ imported-archive .stats-section elements side-by-side (split) or one at a
+ time via the tab bar (tabs). Neither .stats-section is ever removed or
+ rebuilt - see the .stats-mode-split / .stats-mode-tabs rules in styles.css.
+*/
+function setStatsLayoutMode(mode) {
+    const statsView = document.getElementById("stats-view");
+    if (!statsView) return;
+
+    statsView.classList.remove("stats-mode-split", "stats-mode-tabs");
+    statsView.classList.add(mode === "tabs" ? "stats-mode-tabs" : "stats-mode-split");
+
+    document.querySelectorAll("#stats-mode-toggle .stats-mode-btn").forEach((btn) => {
+        btn.classList.toggle("active", btn.dataset.mode === mode);
+    });
+
+    /*
+     Switching into tab view with neither section marked active would hide
+     both datasets, so fall back to whichever tab button is already marked
+     active (or the local-library section, the first tab) instead of
+     leaving the panel blank.
+    */
+    if (mode === "tabs" && !document.querySelector(".stats-section.active")) {
+        const currentTabBtn = document.querySelector(".stats-tab-btn.active");
+        setActiveStatsTab(currentTabBtn ? currentTabBtn.dataset.target : "stats-section-local");
+    }
+}
+
+/*
+ Switches which dataset section is visible while in tab mode. Only matters
+ visually once stats-mode-tabs is active (see CSS), but the .active class is
+ kept in sync regardless of the current mode so switching to tab view later
+ shows whichever tab was last selected.
+*/
+function setActiveStatsTab(sectionId) {
+    document.querySelectorAll(".stats-section").forEach((section) => {
+        section.classList.toggle("active", section.id === sectionId);
+    });
+    document.querySelectorAll(".stats-tab-btn").forEach((btn) => {
+        btn.classList.toggle("active", btn.dataset.target === sectionId);
+    });
+}
+
+// =================================================================
 // GLOBAL READING STATS VIEW LAYOUT ROUTER CONTROLLER
 // =================================================================
 async function showStatsViewState() {
@@ -446,17 +494,33 @@ async function showStatsViewState() {
     if (avgSessionElement) 
         avgSessionElement.innerText = avgSessionMins ? formatMinutes(avgSessionMins) : "—";
 
-    renderCompletionTimeline(completionsByMonth);
+    renderCompletionTimeline(completionsByMonth, "stats-completion-timeline");
+
+    /*
+     Archive dataset: reloaded fresh (same guarded-optional-function pattern
+     used for fetchNotesLibrary() etc. elsewhere in this codebase, since
+     fetchExternalStatsLibrary() lives in 02-db.js) so the archive section
+     reflects the latest imported data every time the stats view opens, then
+     rendered entirely separately from the local dataset above.
+    */
+    if (typeof fetchExternalStatsLibrary === "function") {
+        await fetchExternalStatsLibrary();
+    }
+    renderArchiveStatsSection();
 }
 
 /*
- Renders a simple month-by-month "books completed" list into
- #stats-completion-timeline, if that container has been added to
- index.html. No charting library involved - just a sorted list of month
- labels and completed counts, built from each book's completedDate.
+ Renders a simple month-by-month "books completed" list into the given
+ container, if that container exists in index.html. No charting library
+ involved - just a sorted list of month labels and completed counts. Shared
+ between the local dataset (grouped by book.completedDate, in
+ showStatsViewState() above) and the archive dataset (grouped by
+ entry.dateEnded, in renderArchiveStatsSection() below) via the containerId
+ parameter - the bucketing math itself lives in each caller since the two
+ datasets use different source fields for "when was this completed".
 */
-function renderCompletionTimeline(completionsByMonth) {
-    const container = document.getElementById("stats-completion-timeline");
+function renderCompletionTimeline(completionsByMonth, containerId = "stats-completion-timeline") {
+    const container = document.getElementById(containerId);
     if (!container) return;
 
     const months = Object.keys(completionsByMonth).sort();
@@ -477,4 +541,120 @@ function renderCompletionTimeline(completionsByMonth) {
             </div>`;
         })
         .join("");
+}
+
+/*
+ -----------------------------------------------------------------
+ IMPORTED ARCHIVE STATISTICS
+
+ Everything below reads exclusively from loadedExternalStatsMemory and
+ writes exclusively into the archive-* / stats-archive-* elements added to
+ the archive .stats-section in index.html. It never reads loadedBooksMemory
+ and never touches any local-stats element, so the two datasets stay fully
+ independent, per the same rule the split/tab layout itself is built on.
+ -----------------------------------------------------------------
+*/
+
+/*
+ Maps an archive record's raw readStatus (as imported from the CSV) to a
+ short display label, mirroring the emoji-labeled status column already
+ used in the local per-book table above. Falls back to the raw value
+ (or "—") for any status not in this fixed set, so an unexpected value from
+ the source export still displays instead of disappearing.
+*/
+function formatArchiveReadStatusLabel(readStatus) {
+    switch (readStatus) {
+        case "read": return "✅ Read";
+        case "currently-reading": return "📖 Currently Reading";
+        case "did-not-finish": return "🚫 DNF";
+        case "to-read": return "📌 To Read";
+        default: return readStatus || "—";
+    }
+}
+
+/*
+ Renders the archive stat cards, the archive entries table, and the
+ archive completion timeline - all three from loadedExternalStatsMemory.
+ Called from showStatsViewState() above, right after the local dataset is
+ rendered, using its own set of DOM ids so nothing here overwrites or
+ blends with the local stats.
+*/
+function renderArchiveStatsSection() {
+    const archiveRecords = loadedExternalStatsMemory || [];
+
+    // --- Archive entries table ---
+    const archiveTbody = document.getElementById("stats-archive-table-body");
+    if (archiveTbody) {
+        if (archiveRecords.length === 0) {
+            archiveTbody.innerHTML = `<tr><td colspan="5" style="padding:12px; text-align:center; color:var(--text-muted)">No archive data imported yet.</td></tr>`;
+        } else {
+            archiveTbody.innerHTML = archiveRecords
+                .map((entry) => `
+                <tr style="border-bottom: 1px solid var(--border);">
+                    <td style="padding:12px;">${escapeHtml(entry.title || "Untitled")}</td>
+                    <td style="padding:12px;">${escapeHtml(entry.authors || "—")}</td>
+                    <td style="padding:12px; color:var(--accent);">${escapeHtml(formatArchiveReadStatusLabel(entry.readStatus))}</td>
+                    <td style="padding:12px;">${entry.numberOfPages != null ? entry.numberOfPages : "—"}</td>
+                    <td style="padding:12px;">${entry.starRating != null ? entry.starRating : "—"}</td>
+                </tr>
+                `)
+                .join("");
+        }
+    }
+
+    // --- Stat cards + completion timeline ---
+    let readCount = 0;
+    let currentlyReadingCount = 0;
+    let dnfCount = 0;
+    let ratingSum = 0;
+    let ratingCount = 0;
+    let totalPages = 0;
+    const completionsByMonth = {}; // "YYYY-MM" -> completed count, from dateEnded
+
+    for (const entry of archiveRecords) {
+        if (entry.readStatus === "read") readCount++;
+        else if (entry.readStatus === "currently-reading") currentlyReadingCount++;
+        else if (entry.readStatus === "did-not-finish") dnfCount++;
+
+        if (entry.starRating != null) {
+            ratingSum += entry.starRating;
+            ratingCount++;
+        }
+        if (entry.numberOfPages != null) {
+            totalPages += entry.numberOfPages;
+        }
+
+        // Grouped by completion date, same bucketing approach as the local
+        // timeline above but keyed off the archive's own dateEnded field
+        // rather than the local book's completedDate.
+        if (entry.dateEnded) {
+            const parsedDate = new Date(entry.dateEnded);
+            if (!isNaN(parsedDate)) {
+                const monthKey = `${parsedDate.getFullYear()}-${String(parsedDate.getMonth() + 1).padStart(2, "0")}`;
+                completionsByMonth[monthKey] = (completionsByMonth[monthKey] || 0) + 1;
+            }
+        }
+    }
+
+    const avgRating = ratingCount ? (ratingSum / ratingCount).toFixed(1) : null;
+
+    const totalBooksElement = document.getElementById("archive-stat-total-books");
+    if (totalBooksElement) totalBooksElement.innerText = archiveRecords.length;
+
+    const readBooksElement = document.getElementById("archive-stat-read-books");
+    if (readBooksElement) readBooksElement.innerText = readCount;
+
+    const currentlyReadingElement = document.getElementById("archive-stat-currently-reading");
+    if (currentlyReadingElement) currentlyReadingElement.innerText = currentlyReadingCount;
+
+    const dnfElement = document.getElementById("archive-stat-dnf-count");
+    if (dnfElement) dnfElement.innerText = dnfCount;
+
+    const avgRatingElement = document.getElementById("archive-stat-avg-rating");
+    if (avgRatingElement) avgRatingElement.innerText = avgRating !== null ? `${avgRating} ★` : "—";
+
+    const totalPagesElement = document.getElementById("archive-stat-total-pages");
+    if (totalPagesElement) totalPagesElement.innerText = totalPages.toLocaleString();
+
+    renderCompletionTimeline(completionsByMonth, "stats-archive-completion-timeline");
 }

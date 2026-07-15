@@ -896,6 +896,82 @@ footer {
     margin-top: 20px;
 }
 
+/* --- Stats view: split/tab dataset layout ---
+   Everything below is keyed off a single class on #stats-view
+   (stats-mode-split / stats-mode-tabs, toggled in JS via
+   setStatsLayoutMode()) so switching modes never rebuilds the DOM - it
+   just changes how the same .stats-section elements are displayed. */
+.stats-mode-toggle {
+    display: flex;
+    gap: 6px;
+}
+
+.stats-mode-btn.active {
+    background-color: var(--accent);
+    color: #000;
+    font-weight: bold;
+}
+
+.stats-tab-bar {
+    display: none;
+    gap: 8px;
+}
+
+.stats-tab-btn.active {
+    background-color: var(--accent);
+    color: #000;
+    font-weight: bold;
+}
+
+.stats-section-title {
+    margin-top: 0;
+}
+
+.stats-datasets-container {
+    display: flex;
+    flex-direction: column;
+    gap: 25px;
+    min-height: 0;
+}
+
+.stats-section {
+    display: flex;
+    flex-direction: column;
+    gap: 25px;
+    min-width: 0;
+}
+
+/* Split view (default): both dataset sections side-by-side */
+#stats-view.stats-mode-split .stats-datasets-container {
+    flex-direction: row;
+    align-items: flex-start;
+}
+
+#stats-view.stats-mode-split .stats-section {
+    flex: 1;
+}
+
+/* Tab view: tab bar shown, only the .active dataset section is displayed */
+#stats-view.stats-mode-tabs .stats-tab-bar {
+    display: flex;
+}
+
+#stats-view.stats-mode-tabs .stats-section {
+    display: none;
+}
+
+#stats-view.stats-mode-tabs .stats-section.active {
+    display: flex;
+}
+
+@media (max-width: 900px) {
+    /* Narrow screens can't fit two datasets side-by-side, so split mode
+       falls back to a stacked column - still both visible, just not side-by-side. */
+    #stats-view.stats-mode-split .stats-datasets-container {
+        flex-direction: column;
+    }
+}
+
 .table-wrapper {
     background: var(--bg-card);
     border: 1px solid var(--border);

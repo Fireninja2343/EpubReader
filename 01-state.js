@@ -7,12 +7,14 @@ const STORE_BOOKS = Config.Db.STORE_BOOKS;
 const STORE_GROUPS = Config.Db.STORE_GROUPS;
 const STORE_NOTES = Config.Db.STORE_NOTES;
 const STORE_NOTE_GROUPS = Config.Db.STORE_NOTE_GROUPS;
+const STORE_EXTERNAL_STATS = Config.Db.STORE_EXTERNAL_STATS;
 
 let focusedTimeTrackerHeartbeatInterval = null;
 let currentActiveContextBookIndexId = null; // Refers to the targeted row index selected by the 3 dots panel trigger
 
 let loadedBooksMemory = [];
 let loadedGroupsMemory = [];
+let loadedExternalStatsMemory = []; // Archive-only records; never merged into loadedBooksMemory
 let selectedBookIds = [];
 let activeBookObject = null;
 let activeZipInstance = null;

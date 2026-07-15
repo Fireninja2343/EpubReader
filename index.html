@@ -84,90 +84,167 @@
             </select>
         </div>
     </header> 
-    <div id="stats-view" class="view-panel">
+    <div id="stats-view" class="view-panel stats-mode-split">
         <div class="flex-between">
             <h2>📊 Global Reading Analytics</h2>
-            <button onclick="showLibraryState()" class="btn-stats-back">
-                Back to Library
-            </button>
+            <div class="flex-gap10">
+                <!-- Layout switcher: purely a class toggle on #stats-view (see
+                     setStatsLayoutMode() in 09-stats-and-context-menu.js) -
+                     the two dataset sections below are never rebuilt, just
+                     shown/hidden or laid out differently via CSS. -->
+                <div class="stats-mode-toggle" id="stats-mode-toggle">
+                    <button type="button" class="stats-mode-btn active" data-mode="split" onclick="setStatsLayoutMode('split')">⬛⬛ Split View</button>
+                    <button type="button" class="stats-mode-btn" data-mode="tabs" onclick="setStatsLayoutMode('tabs')">🗂️ Tab View</button>
+                </div>
+                <button onclick="showLibraryState()" class="btn-stats-back">
+                    Back to Library
+                </button>
+            </div>
         </div>
-        
+
         <hr class="hr-divider" />
 
-        <div class="stats-grid">
-            <div class="stat-metric-card">
-                <div class="stat-label">BOOKS IN LIBRARY</div>
-                <div id="stat-total-books" class="stat-value">0</div>
-            </div>
-            <div class="stat-metric-card">
-                <div class="stat-label">BOOKS FULLY READ</div>
-                <div id="stat-read-books" class="stat-value">0</div>
-            </div>
-            <div class="stat-metric-card">
-                <div class="stat-label">TOTAL TIME TRACKED</div>
-                <div id="stat-total-time" class="stat-value">0m</div>
-            </div>
-            <div class="stat-metric-card">
-                <div class="stat-label">AVERAGE TIME PER BOOK</div>
-                <div id="stat-avg-time" class="stat-value">0m</div>
-            </div>
-            <div class="stat-metric-card">
-                <div class="stat-label">TOTAL PAGES READ</div>
-                <div id="stat-global-pages" class="stat-value">0</div>
-            </div>
-            <div class="stat-metric-card">
-                <div class="stat-label">AVERAGE PAGES PER HOUR</div>
-                <div id="stat-avg-pages-per-hour" class="stat-value">-</div>
-            </div>
-            <div class="stat-metric-card">
-                <div class="stat-label">AVERAGE BOOK LENGTH</div>
-                <div id="stat-avg-book-length" class="stat-value">0</div>
-            </div>
-
-            <div class="stat-metric-card">
-                <div class="stat-label">AVERAGE COMPLETED BOOK LENGTH</div>
-                <div id="stat-avg-completed-length" class="stat-value">0</div>
-            </div>
-
-            <div class="stat-metric-card">
-                <div class="stat-label">LONGEST BOOK</div>
-                <div id="stat-longest-book" class="stat-value long-stat-value">-</div>
-            </div>
-
-            <div class="stat-metric-card">
-                <div class="stat-label">SHORTEST BOOK</div>
-                <div id="stat-shortest-book" class="stat-value long-stat-value">-</div>
-            </div>
-
-            <div class="stat-metric-card">
-                <div class="stat-label">TOTAL WORDS READ</div>
-                <div id="stat-total-words-read" class="stat-value">0</div>
-            </div>
-
-            <div class="stat-metric-card">
-                <div class="stat-label">AVERAGE SESSION LENGTH</div>
-                <div id="stat-avg-session-length" class="stat-value">-</div>
-            </div>
-        </div> <h3 class="section-heading">⏱️ Individual Breakdown Per Book</h3>
-        <div class="table-wrapper">
-            <table class="data-table">
-                <thead>
-                    <tr class="table-header-row">
-                        <th>Book Title</th>
-                        <th>Progress</th>
-                        <th>Pages</th>
-                        <th>Time Spent</th>
-                        <th>Pages per Hour</th>
-                    </tr>
-                </thead>
-                <tbody id="stats-books-table-body"></tbody>
-            </table>
-        </div>
-        <h3 class="section-heading">📅 Completion Timeline</h3>
-        <div class="timeline-container" id="stats-completion-timeline">
-            No completed books yet.
+        <!-- Only shown (via CSS) while stats-mode-tabs is active on #stats-view -->
+        <div class="stats-tab-bar" id="stats-tab-bar">
+            <button type="button" class="stats-tab-btn active" data-target="stats-section-local" onclick="setActiveStatsTab('stats-section-local')">📚 Local Library</button>
+            <button type="button" class="stats-tab-btn" data-target="stats-section-archive" onclick="setActiveStatsTab('stats-section-archive')">🗄️ Imported Archive</button>
         </div>
 
+        <div class="stats-datasets-container" id="stats-datasets-container">
+            <!-- LOCAL LIBRARY DATASET - unchanged rendering structure/ids, only
+                 wrapped in a new .stats-section container so it can be laid
+                 out side-by-side with (or tabbed against) the archive dataset. -->
+            <div class="stats-section active" id="stats-section-local" data-dataset="local">
+                <h3 class="stats-section-title">📚 Local Library</h3>
+                <div class="stats-grid">
+                    <div class="stat-metric-card">
+                        <div class="stat-label">BOOKS IN LIBRARY</div>
+                        <div id="stat-total-books" class="stat-value">0</div>
+                    </div>
+                    <div class="stat-metric-card">
+                        <div class="stat-label">BOOKS FULLY READ</div>
+                        <div id="stat-read-books" class="stat-value">0</div>
+                    </div>
+                    <div class="stat-metric-card">
+                        <div class="stat-label">TOTAL TIME TRACKED</div>
+                        <div id="stat-total-time" class="stat-value">0m</div>
+                    </div>
+                    <div class="stat-metric-card">
+                        <div class="stat-label">AVERAGE TIME PER BOOK</div>
+                        <div id="stat-avg-time" class="stat-value">0m</div>
+                    </div>
+                    <div class="stat-metric-card">
+                        <div class="stat-label">TOTAL PAGES READ</div>
+                        <div id="stat-global-pages" class="stat-value">0</div>
+                    </div>
+                    <div class="stat-metric-card">
+                        <div class="stat-label">AVERAGE PAGES PER HOUR</div>
+                        <div id="stat-avg-pages-per-hour" class="stat-value">-</div>
+                    </div>
+                    <div class="stat-metric-card">
+                        <div class="stat-label">AVERAGE BOOK LENGTH</div>
+                        <div id="stat-avg-book-length" class="stat-value">0</div>
+                    </div>
+
+                    <div class="stat-metric-card">
+                        <div class="stat-label">AVERAGE COMPLETED BOOK LENGTH</div>
+                        <div id="stat-avg-completed-length" class="stat-value">0</div>
+                    </div>
+
+                    <div class="stat-metric-card">
+                        <div class="stat-label">LONGEST BOOK</div>
+                        <div id="stat-longest-book" class="stat-value long-stat-value">-</div>
+                    </div>
+
+                    <div class="stat-metric-card">
+                        <div class="stat-label">SHORTEST BOOK</div>
+                        <div id="stat-shortest-book" class="stat-value long-stat-value">-</div>
+                    </div>
+
+                    <div class="stat-metric-card">
+                        <div class="stat-label">TOTAL WORDS READ</div>
+                        <div id="stat-total-words-read" class="stat-value">0</div>
+                    </div>
+
+                    <div class="stat-metric-card">
+                        <div class="stat-label">AVERAGE SESSION LENGTH</div>
+                        <div id="stat-avg-session-length" class="stat-value">-</div>
+                    </div>
+                </div> <h3 class="section-heading">⏱️ Individual Breakdown Per Book</h3>
+                <div class="table-wrapper">
+                    <table class="data-table">
+                        <thead>
+                            <tr class="table-header-row">
+                                <th>Book Title</th>
+                                <th>Progress</th>
+                                <th>Pages</th>
+                                <th>Time Spent</th>
+                                <th>Pages per Hour</th>
+                            </tr>
+                        </thead>
+                        <tbody id="stats-books-table-body"></tbody>
+                    </table>
+                </div>
+                <h3 class="section-heading">📅 Completion Timeline</h3>
+                <div class="timeline-container" id="stats-completion-timeline">
+                    No completed books yet.
+                </div>
+            </div>
+
+            <!-- IMPORTED ARCHIVE DATASET - layout only. Reuses the same
+                 stats-grid / stat-metric-card / table-wrapper / data-table /
+                 timeline-container structure as the local section above so a
+                 future implementation can populate it the same way, but no
+                 archive calculations are wired up here. -->
+            <div class="stats-section" id="stats-section-archive" data-dataset="archive">
+                <h3 class="stats-section-title">🗄️ Imported Archive</h3>
+                <div class="stats-grid">
+                    <div class="stat-metric-card">
+                        <div class="stat-label">TOTAL BOOKS</div>
+                        <div id="archive-stat-total-books" class="stat-value">—</div>
+                    </div>
+                    <div class="stat-metric-card">
+                        <div class="stat-label">BOOKS READ</div>
+                        <div id="archive-stat-read-books" class="stat-value">—</div>
+                    </div>
+                    <div class="stat-metric-card">
+                        <div class="stat-label">CURRENTLY READING</div>
+                        <div id="archive-stat-currently-reading" class="stat-value">—</div>
+                    </div>
+                    <div class="stat-metric-card">
+                        <div class="stat-label">DNF COUNT</div>
+                        <div id="archive-stat-dnf-count" class="stat-value">—</div>
+                    </div>
+                    <div class="stat-metric-card">
+                        <div class="stat-label">AVERAGE RATING</div>
+                        <div id="archive-stat-avg-rating" class="stat-value">—</div>
+                    </div>
+                    <div class="stat-metric-card">
+                        <div class="stat-label">TOTAL PAGES</div>
+                        <div id="archive-stat-total-pages" class="stat-value">—</div>
+                    </div>
+                </div>
+                <h3 class="section-heading">📋 Archive Entries</h3>
+                <div class="table-wrapper">
+                    <table class="data-table">
+                        <thead>
+                            <tr class="table-header-row">
+                                <th>Title</th>
+                                <th>Authors</th>
+                                <th>Status</th>
+                                <th>Pages</th>
+                                <th>Rating</th>
+                            </tr>
+                        </thead>
+                        <tbody id="stats-archive-table-body"></tbody>
+                    </table>
+                </div>
+                <h3 class="section-heading">📅 Completion Timeline</h3>
+                <div class="timeline-container" id="stats-archive-completion-timeline">
+                    No archive data imported yet.
+                </div>
+            </div>
+        </div>
     </div>
 
     <div id="notes-view" class="view-panel">
