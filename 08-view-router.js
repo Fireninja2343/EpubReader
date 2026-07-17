@@ -81,6 +81,18 @@ function showLibraryState() {
         forcePushBookProgressToCloud(activeBookObject.id);
     }
 
+    /*
+     Leaving the reader for the library is a session boundary just like
+     backgrounding the tab or closing it - see the real reading-session
+     engine (startReadingSession/endReadingSession) in
+     09-stats-and-context-menu.js. saveTimeToDB() flushes the exact
+     trailing timeSpentSeconds first so nothing is lost between the last
+     batched write and now, then endReadingSession() closes out and
+     persists whatever session was open for the book being left.
+    */
+    if (typeof saveTimeToDB === "function") saveTimeToDB();
+    if (typeof endReadingSession === "function") endReadingSession("leftReader");
+
     activeBookObject = null;
     stopActiveReadingTimer();
     fetchLocalLibrary();

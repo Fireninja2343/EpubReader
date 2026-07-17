@@ -20,6 +20,15 @@ const Config = {
     CLOUD_PROGRESS_PUSH_INTERVAL_MS: 20000,
     IDLE_THRESHOLD_MS: 30000,
   },
+  Reading: {
+    SESSION_INACTIVITY_TIMEOUT_MS: 5 * 60 * 1000, //mins * 60(from min->s) * 1000(from s->ms)
+  //Cap on how many past sessions are kept per book, so readingSessions doesn't grow unbounded for books re-opened hundreds of times.
+    MAX_STORED_SESSIONS_PER_BOOK: 50,
+  //Cap on how many raw readingHistory entries (see 13-reading-history.js) are kept per book.
+  //One entry is written per uninterrupted reading session, so
+  //365 comfortably covers 1 year of daily reading before the oldest entries start rolling off.
+    MAX_STORED_HISTORY_ENTRIES_PER_BOOK: 365,
+  },
   firebaseConfig: {
     apiKey: "AIzaSyB-lHa5mHi-iMdgGaTe5ehFZE1Xf2T8TkQ",
     authDomain: "epubreader-fire2343.firebaseapp.com",

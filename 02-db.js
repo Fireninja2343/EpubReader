@@ -122,6 +122,22 @@ function saveBookToDatabase(title, coverData, binaryData, analysisMeta = {}) {
       lastOpened: null,
       completedDate: null,
       totalSessions: 0,
+      /* Real reading-session log - see startReadingSession()/endReadingSession()
+         in 09-stats-and-context-menu.js. Kept separate from totalSessions
+         above (which just counts reader launches) so average session
+         length can be computed from actual engaged reading time instead of
+         from "time spent / times opened". */
+      readingSessions: [],
+      /* Raw per-session activity log powering the reading-activity calendar
+         heatmap in the stats view - see 13-reading-history.js and
+         upsertReadingHistoryEntry() below. Kept separate from readingSessions
+         above: readingSessions stores a fully-closed session summary
+         (duration + estimated pages), while readingHistory stores the raw
+         {startTimestamp, endTimestamp, secondsSpent, chapterStart,
+         chapterEnd} data an in-progress session is periodically flushed
+         into, so pages/day and other derived stats can be computed later
+         without ever storing a derived value here. */
+      readingHistory: [],
     };
     store.add(entry).onsuccess = (e) => {
       const newId = e.target.result;
@@ -220,10 +236,128 @@ function markBookAsRead(bookId) {
 }
 
 /*
+ Picks the best available estimate for a completed book's completedDate,
+ for books that were marked isRead before completedDate existed as a
+ field. Falls through the fields in order of how trustworthy they are as
+ a stand-in for "when did this book actually get finished": lastOpened
+ (most recent reader visit) first, then lastModified (last time the
+ record changed at all), then firstOpened, and only if none of those
+ exist does it fall back to right now.
+*/
+function estimateCompletionDate(book) {
+  return book.lastOpened || book.lastModified || book.firstOpened || new Date().getTime();
+}
+
+/*
+ Finds every book where isRead is true but completedDate is missing
+ (older completions predating that field) and backfills it using
+ estimateCompletionDate() above. Never overwrites a completedDate that's
+ already set. Returns a Promise resolving to the number of books updated,
+ so callers (the bulk backfill button and the stats view) can report a
+ count back to the user.
+*/
+function migrateMissingCompletionDates() {
+  return new Promise((resolve) => {
+    const transaction = db.transaction([STORE_BOOKS], "readwrite");
+    const store = transaction.objectStore(STORE_BOOKS);
+    const request = store.getAll();
+    const updatedRecords = [];
+    request.onsuccess = () => {
+      const allBooks = request.result;
+      for (const record of allBooks) {
+        if (record.isRead && !record.completedDate) {
+          record.completedDate = estimateCompletionDate(record);
+          record.lastModified = new Date().getTime();
+          store.put(record);
+          updatedRecords.push(record);
+        }
+      }
+    };
+    transaction.oncomplete = () => {
+      // Mirror each backfilled record up to the cloud, same as every other write path in this file
+      if (typeof pushBookMetadataToCloud === "function") {
+        updatedRecords.forEach((r) => pushBookMetadataToCloud(r));
+      }
+      resolve(updatedRecords.length);
+    };
+    transaction.onerror = () => resolve(0);
+  });
+}
+
+/*
+ Single-book counterpart to migrateMissingCompletionDates() above, for the
+ per-book "Backfill Completion Date" context menu action. Resolves to true
+ if the book was updated, false if it didn't need it (already has a date,
+ isn't marked read, or wasn't found).
+*/
+function migrateSingleBookCompletionDate(bookId) {
+  return new Promise((resolve) => {
+    const transaction = db.transaction([STORE_BOOKS], "readwrite");
+    const store = transaction.objectStore(STORE_BOOKS);
+    let updatedRecord = null;
+    store.get(bookId).onsuccess = (e) => {
+      const record = e.target.result;
+      if (record && record.isRead && !record.completedDate) {
+        record.completedDate = estimateCompletionDate(record);
+        record.lastModified = new Date().getTime();
+        store.put(record);
+        updatedRecord = record;
+      }
+    };
+    transaction.oncomplete = () => {
+      if (updatedRecord && typeof pushBookMetadataToCloud === "function") {
+        pushBookMetadataToCloud(updatedRecord);
+      }
+      resolve(!!updatedRecord);
+    };
+    transaction.onerror = () => resolve(false);
+  });
+}
+
+/*
+ Directly sets (or clears, when passed null) a book's completedDate. This
+ is the write path for the manual "Edit Completion Date" and "Clear
+ Completion Date" context menu actions - unlike migrateSingleBookCompletionDate()
+ above, it's not gated on isRead or on completedDate currently being empty,
+ since a manual edit is allowed to overwrite an existing date or blank one
+ out outright. The migration functions above are left untouched by this.
+*/
+function setBookCompletionDate(bookId, completedDateValue) {
+  return new Promise((resolve) => {
+    const transaction = db.transaction([STORE_BOOKS], "readwrite");
+    const store = transaction.objectStore(STORE_BOOKS);
+    let updatedRecord = null;
+    store.get(bookId).onsuccess = (e) => {
+      const record = e.target.result;
+      if (record) {
+        record.completedDate = completedDateValue;
+        record.lastModified = new Date().getTime();
+        store.put(record);
+        updatedRecord = record;
+      }
+    };
+    transaction.oncomplete = () => {
+      if (updatedRecord && typeof pushBookMetadataToCloud === "function") {
+        pushBookMetadataToCloud(updatedRecord);
+      }
+      resolve(!!updatedRecord);
+    };
+    transaction.onerror = () => resolve(false);
+  });
+}
+
+/*
  Called once per reader launch (see launchEpubReader() in
  06-epub-reader.js) - every visit to the reader counts as a new reading
  session for that book. firstOpened is only ever set the first time;
  lastOpened and totalSessions update on every open after that.
+
+ NOTE: totalSessions here still just counts launches, kept exactly as
+ before for backward compatibility with existing stats and cloud data.
+ The *actual* engaged-reading session (start time, duration, pages read)
+ is tracked separately - see startReadingSession()/endReadingSession() in
+ 09-stats-and-context-menu.js, which write into readingSessions via
+ appendReadingSession() below once a session genuinely ends.
 */
 function recordReadingSessionStart(bookId) {
   if (!bookId || !db) return;
@@ -248,6 +382,113 @@ function recordReadingSessionStart(bookId) {
       }
     }
   };
+}
+
+/*
+ Appends one completed reading-session record to a book's readingSessions
+ array and persists it. This is the write path for a *real* session end
+ (see endReadingSession() in 09-stats-and-context-menu.js), as opposed to
+ recordReadingSessionStart() above which just counts the launch.
+
+ sessionRecord shape: { start, end, durationSeconds, pagesRead, timestamp }
+
+ Trims the array to Config.Reading.MAX_STORED_SESSIONS_PER_BOOK (keeping
+ the most recent ones) so this can't grow unbounded for a book that's
+ been opened hundreds of times. Existing books that predate this field
+ simply have no readingSessions array yet - defaulting to [] here handles
+ that transparently, no separate migration needed.
+*/
+function appendReadingSession(bookId, sessionRecord) {
+  if (!bookId || !db || !sessionRecord) return Promise.resolve(false);
+  return new Promise((resolve) => {
+    const transaction = db.transaction([STORE_BOOKS], "readwrite");
+    const store = transaction.objectStore(STORE_BOOKS);
+    let updatedRecord = null;
+    store.get(bookId).onsuccess = (e) => {
+      const record = e.target.result;
+      if (record) {
+        if (!Array.isArray(record.readingSessions)) record.readingSessions = [];
+        record.readingSessions.push(sessionRecord);
+        const cap = Config.Reading.MAX_STORED_SESSIONS_PER_BOOK;
+        if (record.readingSessions.length > cap) {
+          record.readingSessions = record.readingSessions.slice(-cap);
+        }
+        record.lastModified = new Date().getTime();
+        store.put(record);
+        updatedRecord = record;
+        if (activeBookObject && activeBookObject.id === bookId) {
+          activeBookObject.readingSessions = record.readingSessions;
+        }
+      }
+    };
+    transaction.oncomplete = () => {
+      if (updatedRecord && typeof pushBookMetadataToCloud === "function") {
+        pushBookMetadataToCloud(updatedRecord);
+      }
+      resolve(!!updatedRecord);
+    };
+    transaction.onerror = () => resolve(false);
+  });
+}
+
+/*
+ Write path for one readingHistory entry - raw {startTimestamp, endTimestamp,
+ secondsSpent, chapterStart, chapterEnd} data used by the reading-activity
+ calendar/heatmap in the stats view (see 13-reading-history.js).
+
+ Unlike appendReadingSession() above (which only ever appends a fully-closed
+ session once), a single in-progress reading session is flushed here
+ repeatedly *while it's still open* - see persistHistorySegment() in
+ 13-reading-history.js, called from the periodic save cadence, chapter
+ changes, and session-end. Any entry sharing the same startTimestamp is
+ therefore the same still-open segment being extended, not a new one, so it
+ gets updated in place rather than appended again - this is what keeps one
+ uninterrupted reading session as a single history entry instead of many
+ tiny fragments.
+
+ Existing books that predate this field simply have no readingHistory array
+ yet; the `if (!Array.isArray(...))` guard below initializes it lazily the
+ first time new activity is actually recorded, with no separate migration
+ step and no attempt to fabricate any historical entries.
+*/
+function upsertReadingHistoryEntry(bookId, entry) {
+  if (!bookId || !db || !entry) return Promise.resolve(false);
+  return new Promise((resolve) => {
+    const transaction = db.transaction([STORE_BOOKS], "readwrite");
+    const store = transaction.objectStore(STORE_BOOKS);
+    let updatedRecord = null;
+    store.get(bookId).onsuccess = (e) => {
+      const record = e.target.result;
+      if (record) {
+        if (!Array.isArray(record.readingHistory)) record.readingHistory = [];
+        const existingIdx = record.readingHistory.findIndex(
+          (h) => h.startTimestamp === entry.startTimestamp
+        );
+        if (existingIdx !== -1) {
+          record.readingHistory[existingIdx] = entry;
+        } else {
+          record.readingHistory.push(entry);
+          const cap = Config.Reading.MAX_STORED_HISTORY_ENTRIES_PER_BOOK;
+          if (record.readingHistory.length > cap) {
+            record.readingHistory = record.readingHistory.slice(-cap);
+          }
+        }
+        record.lastModified = new Date().getTime();
+        store.put(record);
+        updatedRecord = record;
+        if (activeBookObject && activeBookObject.id === bookId) {
+          activeBookObject.readingHistory = record.readingHistory;
+        }
+      }
+    };
+    transaction.oncomplete = () => {
+      if (updatedRecord && typeof pushBookMetadataToCloud === "function") {
+        pushBookMetadataToCloud(updatedRecord);
+      }
+      resolve(!!updatedRecord);
+    };
+    transaction.onerror = () => resolve(false);
+  });
 }
 
 function forcePushBookProgressToCloud(bookId) {

@@ -233,6 +233,16 @@ async function handleFileImport(event) {
 // READER LAUNCH & CHAPTER RENDERING
 // =================================================================
 async function launchEpubReader(bookObject) {
+  /*
+   Guards against a book being launched while another one's reading
+   session is still open in memory - normally showLibraryState() (see
+   08-view-router.js) closes out the previous session before the user can
+   get back to the library grid to pick a new book, but this makes
+   launchEpubReader() safe on its own too, rather than relying entirely on
+   callers going through that path first.
+  */
+  if (typeof endReadingSession === "function") endReadingSession("newBookLaunched");
+
   activeBookObject = bookObject;
   document.getElementById("current-book-indicator").innerText =
     bookObject.title;

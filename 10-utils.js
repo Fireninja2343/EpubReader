@@ -100,6 +100,24 @@ function formatMinutes(mins) {
     return h ? `${h}h ${m}m` : `${m}m`;
 }
 
+/*
+ Formats a *calendar-time* duration in milliseconds (e.g. firstOpened to
+ completedDate - see "Completion Duration" in the stats view) - hours while
+ under a day, whole days otherwise. Deliberately separate from
+ formatMinutes() above: that one formats accumulated *reading time*
+ (hh/mm), this one formats *elapsed wall-clock time* between two dates.
+ They're different metrics that happen to both be durations, so they stay
+ different functions rather than being forced through one shared formatter.
+*/
+function formatCompletionDuration(ms) {
+    if (ms === null || ms === undefined || ms < 0) return "—";
+    const hours = ms / (1000 * 60 * 60);
+    if (hours < 1) return "<1h";
+    if (hours < 24) return `${Math.round(hours)}h`;
+    const days = Math.round(hours / 24);
+    return `${days} day${days === 1 ? "" : "s"}`;
+}
+
 let enabled = false;
 const AUTOSCROLL_DEBUG = Config.AutoScroller.AUTOSCROLL_DEBUG;
 

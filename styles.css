@@ -896,6 +896,145 @@ footer {
     margin-top: 20px;
 }
 
+/* =================================================================
+   READING ACTIVITY CALENDAR (GitHub-style contribution heatmap)
+   ================================================================= */
+#reading-activity-calendar-container {
+    --heatmap-cell-size: 12px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 16px;
+    color: var(--text-muted);
+}
+
+.heatmap-scroll-wrapper {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 4px;
+}
+
+.heatmap-months-row {
+    display: grid;
+    grid-auto-flow: column;
+    gap: 3px;
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-bottom: 4px;
+    min-width: max-content;
+}
+
+.heatmap-month-label {
+    white-space: nowrap;
+}
+
+.heatmap-grid {
+    display: grid;
+    grid-auto-flow: column;
+    gap: 3px;
+    min-width: max-content;
+}
+
+.heatmap-day {
+    width: var(--heatmap-cell-size);
+    height: var(--heatmap-cell-size);
+    border-radius: 2px;
+    background-color: var(--border);
+    cursor: default;
+}
+
+.heatmap-day-future {
+    background-color: transparent;
+}
+
+.heatmap-level-0 {
+    background-color: var(--border);
+}
+
+.heatmap-level-1 {
+    background-color: color-mix(in srgb, var(--accent) 25%, var(--bg-card));
+}
+
+.heatmap-level-2 {
+    background-color: color-mix(in srgb, var(--accent) 50%, var(--bg-card));
+}
+
+.heatmap-level-3 {
+    background-color: color-mix(in srgb, var(--accent) 75%, var(--bg-card));
+}
+
+.heatmap-level-4 {
+    background-color: var(--accent);
+}
+
+@media (hover: hover) and (pointer: fine) {
+    .heatmap-day:not(.heatmap-day-future):hover {
+        outline: 1px solid var(--text-main);
+        outline-offset: -1px;
+    }
+}
+
+.heatmap-legend {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-top: 10px;
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+.heatmap-legend .heatmap-day {
+    cursor: default;
+}
+
+/* --- Calendar day hover popup (mirrors #book-context-menu positioning) --- */
+.calendar-day-tooltip {
+    display: none;
+    position: absolute;
+    z-index: 1000;
+    background: var(--bg-sidebar);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+    padding: 10px 12px;
+    min-width: 200px;
+    max-width: 280px;
+    font-size: 12px;
+}
+
+.calendar-day-tooltip-heading {
+    font-weight: bold;
+    color: var(--text-main);
+    margin-bottom: 4px;
+}
+
+.calendar-day-tooltip-total {
+    color: var(--accent);
+    margin-bottom: 8px;
+}
+
+.calendar-day-tooltip-row {
+    padding: 4px 0;
+    border-top: 1px solid var(--border);
+}
+
+.calendar-day-tooltip-row:first-of-type {
+    border-top: none;
+}
+
+.calendar-day-tooltip-book-title {
+    color: var(--text-main);
+    font-weight: 600;
+}
+
+.calendar-day-tooltip-book-meta {
+    color: var(--text-muted);
+}
+
+.calendar-day-tooltip-empty {
+    color: var(--text-muted);
+}
+
 .table-wrapper {
     background: var(--bg-card);
     border: 1px solid var(--border);

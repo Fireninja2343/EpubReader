@@ -179,6 +179,9 @@ async function pushBookMetadataToCloud(book) {
         lastOpened: book.lastOpened ?? null,
         completedDate: book.completedDate ?? null,
         totalSessions: book.totalSessions ?? 0,
+        // Real per-session log - see appendReadingSession() in 02-db.js and
+        // the session lifecycle engine in 09-stats-and-context-menu.js.
+        readingSessions: book.readingSessions ?? [],
       },
       { merge: true },
     );
@@ -369,6 +372,13 @@ function applyRemoteBookUpdate(bookId, remote) {
         rec.lastOpened = remote.lastOpened ?? rec.lastOpened;
         rec.completedDate = remote.completedDate ?? rec.completedDate;
         rec.totalSessions = remote.totalSessions ?? rec.totalSessions;
+        /*
+         Same ?? fallback treatment as the other reading-history fields
+         above: a remote doc written before this feature existed simply
+         won't have readingSessions, so keep whatever this device already
+         has locally instead of wiping it out.
+        */
+        rec.readingSessions = remote.readingSessions ?? rec.readingSessions;
         store.put(rec);
       }
     };
@@ -418,6 +428,7 @@ async function downloadBookFromCloud(bookId, remoteMeta) {
         lastOpened: remoteMeta.lastOpened ?? null,
         completedDate: remoteMeta.completedDate ?? null,
         totalSessions: remoteMeta.totalSessions ?? 0,
+        readingSessions: remoteMeta.readingSessions ?? [],
       });
       tx.oncomplete = resolve;
     });

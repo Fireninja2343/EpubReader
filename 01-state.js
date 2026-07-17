@@ -11,6 +11,18 @@ const STORE_NOTE_GROUPS = Config.Db.STORE_NOTE_GROUPS;
 let focusedTimeTrackerHeartbeatInterval = null;
 let currentActiveContextBookIndexId = null; // Refers to the targeted row index selected by the 3 dots panel trigger
 
+/*
+ Real reading-session tracking state (as opposed to totalSessions, which
+ just counts reader launches - see 02-db.js / 09-stats-and-context-menu.js).
+ currentSessionStartTime is null whenever no session is currently open;
+ a session only actually "starts" on the first real interaction after the
+ reader opens, not merely on open, so a 5-second peek that the user
+ immediately backs out of doesn't get recorded as a session at all.
+*/
+let currentSessionStartTime = null;
+let currentSessionLastInteractionTime = null;
+let currentSessionStartChapterPointer = null;
+
 let loadedBooksMemory = [];
 let loadedGroupsMemory = [];
 let selectedBookIds = [];

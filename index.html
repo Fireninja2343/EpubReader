@@ -29,6 +29,7 @@
     <script src="10-utils.js" defer></script>
     <script src="11-firebase-sync.js" defer></script>
     <script src="12-notes.js" defer></script>
+    <script src="13-reading-history.js" defer></script>
 </head>
 
 <body>
@@ -148,6 +149,36 @@
                 <div class="stat-label">AVERAGE SESSION LENGTH</div>
                 <div id="stat-avg-session-length" class="stat-value">-</div>
             </div>
+
+            <div class="stat-metric-card">
+                <div class="stat-label">AVERAGE COMPLETION DURATION</div>
+                <div id="stat-avg-completion-duration" class="stat-value">-</div>
+            </div>
+
+            <div class="stat-metric-card">
+                <div class="stat-label">FASTEST COMPLETED BOOK</div>
+                <div id="stat-fastest-completion" class="stat-value long-stat-value">-</div>
+            </div>
+
+            <div class="stat-metric-card">
+                <div class="stat-label">SLOWEST COMPLETED BOOK</div>
+                <div id="stat-slowest-completion" class="stat-value long-stat-value">-</div>
+            </div>
+
+            <div class="stat-metric-card">
+                <div class="stat-label">AVERAGE PAGES PER DAY</div>
+                <div id="stat-avg-pages-per-day" class="stat-value">-</div>
+            </div>
+
+            <div class="stat-metric-card">
+                <div class="stat-label">FASTEST BY PAGES/DAY</div>
+                <div id="stat-fastest-pages-per-day" class="stat-value long-stat-value">-</div>
+            </div>
+
+            <div class="stat-metric-card">
+                <div class="stat-label">SLOWEST BY PAGES/DAY</div>
+                <div id="stat-slowest-pages-per-day" class="stat-value long-stat-value">-</div>
+            </div>
         </div> <h3 class="section-heading">⏱️ Individual Breakdown Per Book</h3>
         <div class="table-wrapper">
             <table class="data-table">
@@ -158,17 +189,31 @@
                         <th>Pages</th>
                         <th>Time Spent</th>
                         <th>Pages per Hour</th>
+                        <th>Completion Duration</th>
+                        <th>Pages per Day</th>
                     </tr>
                 </thead>
                 <tbody id="stats-books-table-body"></tbody>
             </table>
         </div>
+        <h3 class="section-heading">🔥 Reading Activity</h3>
+        <div class="timeline-container" id="reading-activity-calendar-container">
+            No reading activity recorded yet.
+        </div>
+
         <h3 class="section-heading">📅 Completion Timeline</h3>
         <div class="timeline-container" id="stats-completion-timeline">
             No completed books yet.
         </div>
 
+        <h3 class="section-heading">📈 Reading Speed Over Lifetime</h3>
+        <div class="timeline-container" id="stats-reading-speed-progression">
+            No completed books with tracked reading time yet.
+        </div>
+
     </div>
+
+    <div id="calendar-day-tooltip" class="calendar-day-tooltip"></div>
 
     <div id="notes-view" class="view-panel">
         <div class="flex-between">

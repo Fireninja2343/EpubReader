@@ -157,6 +157,17 @@ function trackReadingProgress() {
         updateBookProgressInDB(activeBookObject.id, activeSpinePointer, top, chapterHasChangedSinceLastPush);
         if (chapterHasChangedSinceLastPush) {
             lastPushedChapterIndex = activeSpinePointer;
+            /*
+             A chapter change is one of the moments the reading-history
+             calendar (see 13-reading-history.js) wants flushed right away:
+             it both widens the open segment's chapterStart/chapterEnd range
+             to include the newly-reached chapter, and persists that segment
+             immediately rather than waiting for the next periodic save.
+            */
+            if (typeof recordHistoryChapterVisited === "function") {
+                recordHistoryChapterVisited(activeSpinePointer);
+                if (typeof persistHistorySegment === "function") persistHistorySegment();
+            }
         }
     }
 }
