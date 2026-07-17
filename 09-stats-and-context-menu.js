@@ -892,9 +892,14 @@ function computeLibraryDistributions(perBookMetrics) {
  container id. Shared by all three Library Distribution charts rather than
  each one having its own bespoke rendering - the only thing that differs
  between them is which {entries, eligibleCount} object gets passed in.
- Bar height is relative to the largest count in this particular chart (not
- a shared global max), since these are different metrics on different
- scales and each chart should use its own full height range.
+
+ Bar height is driven by the exact same "percent of eligibleCount" figure
+ shown in the count/percentage label underneath each bar (rather than a
+ separate relative-to-the-largest-bucket calculation) - those two numbers
+ disagreeing was a real bug: a bucket could show "3 books (19%)" while its
+ bar was drawn at 75% height because the height had been computed against
+ the chart's own largest bucket instead of the full eligible count. Tying
+ both to the same number keeps what's drawn and what's printed consistent.
 */
 function renderDistributionBarChart(containerId, distribution) {
     const container = document.getElementById(containerId);
@@ -906,13 +911,11 @@ function renderDistributionBarChart(containerId, distribution) {
         return;
     }
 
-    const maxCount = Math.max(...entries.map(e => e.count));
-
     const bars = entries.map(e => {
         const percent = eligibleCount ? (e.count / eligibleCount) * 100 : 0;
-        // Relative bar height within this chart, with a small floor so a
+        // Bar height matches this same percent, with a small floor so a
         // non-zero bucket is still visibly a bar rather than a sliver.
-        const heightPercent = maxCount ? Math.max(4, (e.count / maxCount) * 100) : 0;
+        const heightPercent = e.count > 0 ? Math.max(4, percent) : 0;
         return `
             <div class="dist-bar-column">
                 <div class="dist-bar-track">

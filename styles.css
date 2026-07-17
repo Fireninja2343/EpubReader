@@ -1111,12 +1111,12 @@ footer {
 .distribution-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-    gap: 20px;
+    gap: 18px;
 }
 
 .distribution-card {
     background: var(--bg-card);
-    padding: 16px;
+    padding: 14px;
     border-radius: 6px;
     border: 1px solid var(--border);
     box-shadow: 2px 2px 15px rgba(0,0,0,0.2);
@@ -1137,7 +1137,11 @@ footer {
     align-items: flex-end;
     justify-content: space-between;
     gap: 8px;
-    height: 160px;
+    /* Slightly taller than a single-line layout would need, since
+       .dist-bar-count can now wrap to two lines on narrow columns (see
+       .dist-bar-count) - this keeps the bar track from being squeezed
+       down too far when that happens. */
+    height: 180px;
 }
 
 .dist-bar-column {
@@ -1175,7 +1179,18 @@ footer {
     font-weight: 600;
     color: var(--text-main);
     margin-top: 6px;
-    white-space: nowrap;
+    /*
+     Was nowrap, which let this text spill sideways into the neighboring
+     column once the chart got narrow enough that a column's width dropped
+     below the text's natural width - "3 books (19%)" from one column would
+     visually run into "3 books (19%)" from the next. Wrapping instead lets
+     it break onto a second line ("3 books" / "(19%)") and stay contained
+     within its own column, which is what min-width: 0 on .dist-bar-column
+     was already set up to allow.
+    */
+    white-space: normal;
+    overflow-wrap: break-word;
+    text-align: center;
 }
 
 .dist-bar-label {
@@ -1788,7 +1803,7 @@ footer {
     }
 
     .dist-bar-chart {
-        height: 120px;
+        height: 140px;
     }
 
     .dist-bar-label {

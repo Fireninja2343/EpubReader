@@ -96,7 +96,7 @@ function base64ToBlob(base64) {
 
 function formatMinutes(mins) {
     const h = Math.floor(mins / 60);
-    const m = mins % 60;
+    const m = Math.round((mins % 60)*10)/10;
     return h ? `${h}h ${m}m` : `${m}m`;
 }
 
