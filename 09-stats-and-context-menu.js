@@ -596,11 +596,12 @@ function computeStatAverages(perBookMetrics) {
 
  higherIsBetter flips which direction (higher or lower than average) counts
  as "good" (green) vs "bad" (red) for this particular metric - e.g. a
- shorter Completion Duration is an improvement, but a shorter Time Spent
- isn't really "better", it's just different, so that one is framed neutrally
- in terms of longer/shorter rather than good/bad. Even so, the color scale
- itself only needs a single higher-is-good boolean per metric because within
- each metric one direction is unambiguously the "faster/more" direction.
+ shorter Completion Duration is an improvement, and so is a shorter Time
+ Spent (spending less time than average to get through a book reads as
+ faster/better), whereas a higher Pages per Hour is the "faster/better"
+ direction instead. Each metric only needs a single higher-is-good boolean
+ because within that metric one direction is unambiguously the
+ "faster/more efficient" one.
 */
 function buildStatDeltaHtml(value, average, formatFn, higherLabel, lowerLabel, higherIsBetter) {
     if (value === null || value === undefined || average === null || average === undefined || average === 0) {
@@ -623,7 +624,7 @@ function buildStatDeltaHtml(value, average, formatFn, higherLabel, lowerLabel, h
     const isGood = isAboveAverage === higherIsBetter;
     const arrow = isAboveAverage ? "↑" : "↓";
     const directionLabel = isAboveAverage ? higherLabel : lowerLabel;
-    const formattedAbsDiff = formatFn(Math.abs(absoluteDiff));
+    const formattedAbsDiff = formatFn(Math.round(Math.abs(absoluteDiff)*10)/10);
     const sign = isAboveAverage ? "+" : "-";
 
     /*
@@ -662,7 +663,7 @@ function buildStatsRowHtml(m, statAverages) {
 
     const timeSpentDelta = buildStatDeltaHtml(
         m.mins > 0 ? m.mins : null, statAverages.timeSpentMins,
-        formatMinutes, "longer than", "shorter than", true, // higher time spent isn't "bad", just framed as longer/shorter below
+        formatMinutes, "longer than", "shorter than", false,
     );
     const pagesPerHourDelta = buildStatDeltaHtml(
         m.pagesPerHour, statAverages.pagesPerHour,
@@ -670,7 +671,7 @@ function buildStatsRowHtml(m, statAverages) {
     );
     const completionDurationDelta = buildStatDeltaHtml(
         m.completionDurationMs, statAverages.completionDurationMs,
-        formatCompletionDuration, "slower than", "faster than", false, // shorter completion duration is the "good" direction
+        formatCompletionDuration, "slower than", "faster than", false,
     );
     const pagesPerDayDelta = buildStatDeltaHtml(
         m.pagesPerDay, statAverages.pagesPerDay,
@@ -688,6 +689,242 @@ function buildStatsRowHtml(m, statAverages) {
             <td style="padding:12px;">${m.pagesPerDay !== null ? `${m.pagesPerDay.toFixed(1)} p/day` : "—"}${pagesPerDayDelta}</td>
         </tr>
     `;
+}
+
+// =================================================================
+// LIBRARY DISTRIBUTION - DYNAMIC BUCKETING ENGINE
+// =================================================================
+/*
+ Builds equal-width numeric buckets spanning the data's own range, instead
+ of hardcoding fixed cutoffs (e.g. "0-299, 300-499, ..."). This is what
+ keeps the Book Length / Reading Speed distributions informative as the
+ library's numbers drift over time - e.g. if the average book length crept
+ up to 1000+ pages, static 0-299/300-499/.../900+ buckets would dump almost
+ everything into the last bucket. Recomputing the bucket edges from the
+ live data every time this renders avoids that.
+
+ The range used for bucket *width* is trimmed using an IQR ("interquartile
+ range") fence rather than the raw min/max - a plain min/max range lets a
+ single extreme outlier (e.g. one 4000-page book among a library of
+ 100-1000 page books) stretch every bucket so wide that almost all the
+ "normal" books collapse into the first bucket and the chart stops being
+ informative for anyone but the outlier. Fencing the range first means
+ bucket width is set by where the bulk of the library actually sits;
+ values outside the fence don't disappear - they still get tallied, just
+ into the first or last bucket (whose edges are -Infinity/Infinity) rather
+ than dictating how wide every bucket is. See buildDynamicBuckets() for the
+ exact fence definition.
+
+ Falls back to the caller-supplied static buckets whenever the dynamic
+ approach "doesn't work" - defined here as: fewer than MIN_VALUES_FOR_DYNAMIC
+ data points, or a degenerate fenced range (fencedMax === fencedMin, which
+ would otherwise produce zero-width buckets and a division by zero - e.g. a
+ library where almost every book is exactly the same length aside from one
+ or two outliers).
+
+ Returns an array of {min, max, label} - the first bucket's min and the
+ last bucket's max are -Infinity/Infinity so every value, however extreme,
+ always has a home.
+*/
+const MIN_VALUES_FOR_DYNAMIC_BUCKETS = 5;
+const IQR_FENCE_MULTIPLIER = 1.5; // standard "Tukey's fence" multiplier for mild-outlier trimming
+
+// Linear-interpolation percentile over a sorted array (values must already be sorted ascending).
+function percentile(sortedValues, p) {
+    const idx = p * (sortedValues.length - 1);
+    const lower = Math.floor(idx);
+    const upper = Math.ceil(idx);
+    if (lower === upper) return sortedValues[lower];
+    const frac = idx - lower;
+    return sortedValues[lower] + (sortedValues[upper] - sortedValues[lower]) * frac;
+}
+
+function buildDynamicBuckets(values, staticBuckets, bucketCount, unitLabel) {
+    if (values.length < MIN_VALUES_FOR_DYNAMIC_BUCKETS) return staticBuckets;
+
+    const sorted = [...values].sort((a, b) => a - b);
+
+    /*
+     Bucket *width* is sized off an IQR ("interquartile range") fence
+     rather than the raw min/max, so a single extreme outlier - e.g. one
+     4000-page book sitting in an otherwise 100-1000 page library - can't
+     stretch every bucket wide enough to crush all the "normal" books into
+     the first one. This is the standard Tukey's-fence definition of a mild
+     outlier: anything more than 1.5x the middle 50%'s spread (Q3 - Q1)
+     beyond Q1 or Q3. Clamped back to the real min/max wherever the fence
+     would extend past the actual data (e.g. no outliers at all, where the
+     fence naturally lands outside the data and should just use the data's
+     own edges instead).
+
+     This is deliberately count-based via quartiles rather than a fixed
+     "trim the outer 10%" cut: chopping a fixed percentage off a small
+     dataset (e.g. 10 books) can still let a single extreme value leak
+     partway into the trimmed edge through interpolation, whereas Q1/Q3 and
+     the fence multiplier scale naturally with how spread out the *bulk* of
+     the data actually is.
+    */
+    const q1 = percentile(sorted, 0.25);
+    const q3 = percentile(sorted, 0.75);
+    const iqr = q3 - q1;
+    const fenceMin = q1 - IQR_FENCE_MULTIPLIER * iqr;
+    const fenceMax = q3 + IQR_FENCE_MULTIPLIER * iqr;
+    const trimmedMin = Math.max(sorted[0], fenceMin);
+    const trimmedMax = Math.min(sorted[sorted.length - 1], fenceMax);
+    if (!(trimmedMax > trimmedMin)) return staticBuckets; // degenerate trimmed range
+
+    const width = (trimmedMax - trimmedMin) / bucketCount;
+
+    // Compute every bucket's true numeric edges first (edgeAt(i) is the
+    // boundary between bucket i-1 and bucket i in "normal" trimmed-range
+    // terms) before touching Infinity or labels at all - keeps the display
+    // logic below simple since it only ever reads real numbers.
+    const edgeAt = (i) => trimmedMin + i * width;
+
+    const buckets = [];
+    for (let i = 0; i < bucketCount; i++) {
+        const isFirst = i === 0;
+        const isLast = i === bucketCount - 1;
+        // Real (finite) edges are what the label always shows; -Infinity/
+        // Infinity are only used for the actual min/max used to tally
+        // values, so outliers below/above the trimmed range still land in
+        // the first/last bucket instead of being dropped.
+        const min = isFirst ? -Infinity : edgeAt(i);
+        const max = isLast ? Infinity : edgeAt(i + 1);
+        const label = isLast
+            ? `${Math.round(edgeAt(i))}+ ${unitLabel}`
+            : `${Math.round(edgeAt(i))}\u2013${Math.round(edgeAt(i + 1))} ${unitLabel}`;
+        buckets.push({ min, max, label });
+    }
+    return buckets;
+}
+
+// Places a single value into the matching bucket's count. Shared by every
+// distribution below rather than each one writing its own find-and-increment.
+function tallyIntoBuckets(values, buckets) {
+    const counts = buckets.map(() => 0);
+    for (const value of values) {
+        for (let i = 0; i < buckets.length; i++) {
+            // First bucket's min and last bucket's max can be -Infinity/
+            // Infinity (see buildDynamicBuckets' outlier trimming), so this
+            // condition is naturally always-true on whichever end is open;
+            // every other bucket is a normal [min, max) range.
+            if (value >= buckets[i].min && (value < buckets[i].max || buckets[i].max === Infinity)) {
+                counts[i]++;
+                break;
+            }
+        }
+    }
+    return buckets.map((b, i) => ({ label: b.label, count: counts[i] }));
+}
+
+/*
+ Computes the three Library Distribution breakdowns, reusing perBookMetrics
+ (already built by the main loop in showStatsViewState()) instead of
+ re-deriving pagesRead/isRead/pagesPerHour a second time. Each distribution
+ returns { entries: [{label, count}], eligibleCount } - eligibleCount is the
+ denominator for that distribution's percentages, which differs per chart
+ (all books for Length/Status, only books with a valid pages/hour for Speed).
+*/
+const BOOK_LENGTH_STATIC_BUCKETS = [
+    { min: 0, max: 300, label: "0\u2013299 pages" },
+    { min: 300, max: 500, label: "300\u2013499 pages" },
+    { min: 500, max: 700, label: "500\u2013699 pages" },
+    { min: 700, max: 900, label: "700\u2013899 pages" },
+    { min: 900, max: Infinity, label: "900+ pages" },
+];
+
+const READING_SPEED_STATIC_BUCKETS = [
+    { min: 0, max: 40, label: "<40 p/h" },
+    { min: 40, max: 60, label: "40\u201360 p/h" },
+    { min: 60, max: 80, label: "60\u201380 p/h" },
+    { min: 80, max: 100, label: "80\u2013100 p/h" },
+    { min: 100, max: Infinity, label: "100+ p/h" },
+];
+
+function computeLibraryDistributions(perBookMetrics) {
+    // --- 1. Book Length Distribution ---
+    // Every book with a known page count qualifies, read or not - this is a
+    // library-composition chart, not a reading-progress one.
+    const pageCounts = perBookMetrics.filter(m => m.totalPages > 0).map(m => m.totalPages);
+    const lengthBuckets = buildDynamicBuckets(pageCounts, BOOK_LENGTH_STATIC_BUCKETS, 5, "pages");
+    const bookLength = {
+        entries: tallyIntoBuckets(pageCounts, lengthBuckets),
+        eligibleCount: pageCounts.length,
+    };
+
+    // --- 2. Reading Status Distribution ---
+    // Three fixed, mutually-exclusive buckets straight off each book's own
+    // isRead/isStarted flags (already computed in the main loop) - nothing
+    // dynamic here, since "how many status categories exist" isn't a
+    // function of the data the way page-count or speed ranges are.
+    let completedCount = 0, inProgressCount = 0, notStartedCount = 0;
+    for (const m of perBookMetrics) {
+        if (m.isRead) completedCount++;
+        else if (m.isStarted) inProgressCount++;
+        else notStartedCount++;
+    }
+    const readingStatus = {
+        entries: [
+            { label: "Completed", count: completedCount },
+            { label: "In Progress", count: inProgressCount },
+            { label: "Not Started", count: notStartedCount },
+        ],
+        eligibleCount: perBookMetrics.length,
+    };
+
+    // --- 3. Reading Speed Distribution ---
+    // Only books with a meaningful pages/hour figure qualify - same
+    // eligibility already enforced when perBookMetrics.pagesPerHour was
+    // computed (requires mins > 0), so no separate time-tracked threshold
+    // needs to be redefined here.
+    const speeds = perBookMetrics.filter(m => m.pagesPerHour !== null).map(m => m.pagesPerHour);
+    const speedBuckets = buildDynamicBuckets(speeds, READING_SPEED_STATIC_BUCKETS, 5, "p/h");
+    const readingSpeed = {
+        entries: tallyIntoBuckets(speeds, speedBuckets),
+        eligibleCount: speeds.length,
+    };
+
+    return { bookLength, readingStatus, readingSpeed };
+}
+
+/*
+ Renders one distribution as a simple vertical bar chart into the given
+ container id. Shared by all three Library Distribution charts rather than
+ each one having its own bespoke rendering - the only thing that differs
+ between them is which {entries, eligibleCount} object gets passed in.
+ Bar height is relative to the largest count in this particular chart (not
+ a shared global max), since these are different metrics on different
+ scales and each chart should use its own full height range.
+*/
+function renderDistributionBarChart(containerId, distribution) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+
+    const { entries, eligibleCount } = distribution;
+    if (!eligibleCount || entries.every(e => e.count === 0)) {
+        container.innerHTML = `<div style="color:var(--text-muted)">Not enough data yet.</div>`;
+        return;
+    }
+
+    const maxCount = Math.max(...entries.map(e => e.count));
+
+    const bars = entries.map(e => {
+        const percent = eligibleCount ? (e.count / eligibleCount) * 100 : 0;
+        // Relative bar height within this chart, with a small floor so a
+        // non-zero bucket is still visibly a bar rather than a sliver.
+        const heightPercent = maxCount ? Math.max(4, (e.count / maxCount) * 100) : 0;
+        return `
+            <div class="dist-bar-column">
+                <div class="dist-bar-track">
+                    <div class="dist-bar-fill" style="height:${heightPercent}%;"></div>
+                </div>
+                <div class="dist-bar-count">${e.count} book${e.count === 1 ? "" : "s"} (${percent.toFixed(0)}%)</div>
+                <div class="dist-bar-label">${escapeHtml(e.label)}</div>
+            </div>
+        `;
+    }).join("");
+
+    container.innerHTML = `<div class="dist-bar-chart">${bars}</div>`;
 }
 
 // =================================================================
@@ -897,6 +1134,11 @@ async function showStatsViewState() {
         perBookMetrics.push({
             book,
             isRead,
+            // Same "has the user actually opened/progressed this book" check
+            // already used just above for the pagesRead estimate - reused
+            // here (rather than re-derived) for the Reading Status
+            // distribution's "In Progress" vs "Not Started" split.
+            isStarted: book.currentChapter > 0 || book.scrollOffset > 100,
             pagesRead,
             totalPages,
             mins,
@@ -919,6 +1161,17 @@ async function showStatsViewState() {
 
     // Flush table rows inside dashboard
     tbody.innerHTML = perBookMetrics.map(m => buildStatsRowHtml(m, statAverages)).join("");
+
+    /*
+     Library Distribution charts (Book Length, Reading Status, Reading
+     Speed) - see computeLibraryDistributions()/renderDistributionBarChart()
+     above. Reuses perBookMetrics rather than a fresh pass over
+     loadedBooksMemory, same as statAverages just above.
+    */
+    const libraryDistributions = computeLibraryDistributions(perBookMetrics);
+    renderDistributionBarChart("dist-book-length", libraryDistributions.bookLength);
+    renderDistributionBarChart("dist-reading-status", libraryDistributions.readingStatus);
+    renderDistributionBarChart("dist-reading-speed", libraryDistributions.readingSpeed);
 
     // --- MATH COMPILATIONS & UI UPDATES ---
     const totalMins = Math.round(combinedSecondsTracked / 60);
