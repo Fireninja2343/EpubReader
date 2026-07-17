@@ -681,10 +681,18 @@ async function showStatsViewState() {
             }
         }
 
-        // Only books with both fields qualify - a book can be marked read
-        // (or have a manually-edited completedDate via setBookCompletionDate())
-        // without firstOpened ever having been set, e.g. a very old record.
+        /*
+         Only books with both fields qualify - a book can be marked read (or
+         have a manually-edited completedDate via setBookCompletionDate())
+         without firstOpened ever having been set, e.g. a very old record.
+         Pages/day is derived from the same completionDurationMs computed
+         here rather than re-deriving it, but is additionally gated on
+         isRead since - unlike Completion Duration - it's a "completed
+         books only" metric (calendar days is floored at 1 so a same-day
+         completion can't divide by a near-zero day count).
+        */
         let completionDurationMs = null;
+        let pagesPerDay = null;
         if (book.firstOpened && book.completedDate) {
             completionDurationMs = book.completedDate - book.firstOpened;
             completionDurationSumMs += completionDurationMs;
@@ -695,27 +703,18 @@ async function showStatsViewState() {
             if (!slowestCompletion || completionDurationMs > slowestCompletion.durationMs) {
                 slowestCompletion = { book, durationMs: completionDurationMs };
             }
-        }
 
-        /*
-         Pages/day: only for completed books with both firstOpened and
-         completedDate (isRead used as the "completed books only"
-         requirement, matching how completedBooks/completionsByMonth above
-         are gated). Calendar days is the completion duration converted
-         from ms to whole-ish days, floored at 1 so a same-day completion
-         doesn't divide by zero or produce an inflated fractional day.
-        */
-        let pagesPerDay = null;
-        if (isRead && book.firstOpened && book.completedDate && totalPages > 0) {
-            const calendarDays = Math.max(1, completionDurationMs / (1000 * 60 * 60 * 24));
-            pagesPerDay = totalPages / calendarDays;
-            pagesPerDaySum += pagesPerDay;
-            pagesPerDayCount++;
-            if (!fastestPagesPerDay || pagesPerDay > fastestPagesPerDay.pagesPerDay) {
-                fastestPagesPerDay = { book, pagesPerDay };
-            }
-            if (!slowestPagesPerDay || pagesPerDay < slowestPagesPerDay.pagesPerDay) {
-                slowestPagesPerDay = { book, pagesPerDay };
+            if (isRead && totalPages > 0) {
+                const calendarDays = Math.max(1, completionDurationMs / (1000 * 60 * 60 * 24));
+                pagesPerDay = totalPages / calendarDays;
+                pagesPerDaySum += pagesPerDay;
+                pagesPerDayCount++;
+                if (!fastestPagesPerDay || pagesPerDay > fastestPagesPerDay.pagesPerDay) {
+                    fastestPagesPerDay = { book, pagesPerDay };
+                }
+                if (!slowestPagesPerDay || pagesPerDay < slowestPagesPerDay.pagesPerDay) {
+                    slowestPagesPerDay = { book, pagesPerDay };
+                }
             }
         }
 
@@ -739,9 +738,11 @@ async function showStatsViewState() {
         const pagesPerHour = mins > 0 ? (pagesRead / mins * 60).toFixed(1) : "—";
         if (mins > 0) timedPagesRead += pagesRead;
 
-        // Reading Speed Over Lifetime: completed books only, needs both a
-        // completedDate (for chronological sorting) and tracked reading
-        // time (timeSpentSeconds > 0, so a division isn't done by zero).
+        /*
+         Reading Speed Over Lifetime: completed books only, needs both a
+         completedDate (for chronological sorting) and tracked reading
+         time (timeSpentSeconds > 0, so a division isn't done by zero).
+        */
         if (isRead && book.completedDate && totalPages > 0 && (book.timeSpentSeconds || 0) > 0) {
             const trackedReadingHours = book.timeSpentSeconds / 3600;
             speedProgressionEntries.push({
