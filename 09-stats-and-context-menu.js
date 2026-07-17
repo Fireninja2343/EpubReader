@@ -645,7 +645,7 @@ function buildStatDeltaHtml(value, average, formatFn, higherLabel, lowerLabel, h
 
     return `
         <div class="stat-delta-row" style="color:${color};">
-            ${arrow} ${escapeHtml(formattedAbsDiff)} ${escapeHtml(directionLabel)} average
+            ${arrow} ${escapeHtml(formattedAbsDiff)} ${escapeHtml(directionLabel)}
             (<span class="${emphasisClass}">${sign}${absPercent.toFixed(1)}%</span>)
         </div>
     `;
@@ -663,19 +663,19 @@ function buildStatsRowHtml(m, statAverages) {
 
     const timeSpentDelta = buildStatDeltaHtml(
         m.mins > 0 ? m.mins : null, statAverages.timeSpentMins,
-        formatMinutes, "longer than", "shorter than", false,
+        formatMinutes, "", "", false,
     );
     const pagesPerHourDelta = buildStatDeltaHtml(
         m.pagesPerHour, statAverages.pagesPerHour,
-        (v) => `${v.toFixed(1)} p/h`, "faster than", "slower than", true,
+        (v) => `${v.toFixed(1)} p/h`, "", "", true,
     );
     const completionDurationDelta = buildStatDeltaHtml(
         m.completionDurationMs, statAverages.completionDurationMs,
-        formatCompletionDuration, "slower than", "faster than", false,
+        formatCompletionDuration, "", "", false,
     );
     const pagesPerDayDelta = buildStatDeltaHtml(
         m.pagesPerDay, statAverages.pagesPerDay,
-        (v) => `${v.toFixed(1)} pages/day`, "above", "below", true,
+        (v) => `${v.toFixed(1)} pages/day`, "", "", true,
     );
 
     return `
