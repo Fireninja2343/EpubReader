@@ -560,6 +560,137 @@ async function openBookDiagnosticsModal(bookObj, modeType) {
 }
 
 // =================================================================
+// PER-BOOK "DELTA FROM AVERAGE" COMPARISONS
+// =================================================================
+/*
+ Computes the four library-wide averages the per-book stats table compares
+ each book against: Time Spent (minutes), Pages per Hour, Completion
+ Duration (ms), Pages per Day. Each average is only calculated from books
+ that actually have valid data for that particular metric - a book with no
+ tracked reading time doesn't drag down the Time Spent average, a book
+ that's never been completed doesn't count toward Completion Duration, etc.
+ Returns null for any average that has no qualifying books at all, which
+ buildStatDeltaHtml() below treats as "not enough data, don't show a
+ comparison" rather than dividing by zero.
+*/
+function computeStatAverages(perBookMetrics) {
+    const timeSpentValues = perBookMetrics.filter(m => m.mins > 0).map(m => m.mins);
+    const pagesPerHourValues = perBookMetrics.filter(m => m.pagesPerHour !== null).map(m => m.pagesPerHour);
+    const completionDurationValues = perBookMetrics.filter(m => m.completionDurationMs !== null).map(m => m.completionDurationMs);
+    const pagesPerDayValues = perBookMetrics.filter(m => m.pagesPerDay !== null).map(m => m.pagesPerDay);
+
+    const mean = (arr) => arr.length ? arr.reduce((sum, v) => sum + v, 0) / arr.length : null;
+
+    return {
+        timeSpentMins: mean(timeSpentValues),
+        pagesPerHour: mean(pagesPerHourValues),
+        completionDurationMs: mean(completionDurationValues),
+        pagesPerDay: mean(pagesPerDayValues),
+    };
+}
+
+/*
+ Builds the small "↑/↓ X longer/faster/etc than average (+Y%)" line shown
+ underneath a stat cell, or "" if there isn't a valid average to compare
+ against (either this book lacks the data, or no book in the library does).
+
+ higherIsBetter flips which direction (higher or lower than average) counts
+ as "good" (green) vs "bad" (red) for this particular metric - e.g. a
+ shorter Completion Duration is an improvement, but a shorter Time Spent
+ isn't really "better", it's just different, so that one is framed neutrally
+ in terms of longer/shorter rather than good/bad. Even so, the color scale
+ itself only needs a single higher-is-good boolean per metric because within
+ each metric one direction is unambiguously the "faster/more" direction.
+*/
+function buildStatDeltaHtml(value, average, formatFn, higherLabel, lowerLabel, higherIsBetter) {
+    if (value === null || value === undefined || average === null || average === undefined || average === 0) {
+        return "";
+    }
+
+    const absoluteDiff = value - average;
+    const percentDiff = (absoluteDiff / average) * 100;
+    const absPercent = Math.abs(percentDiff);
+
+    // Within ~5% of average reads as "approximately average" rather than
+    // forcing every book into a strict above/below bucket - a 1% difference
+    // isn't a meaningful comparison, just noise.
+    const APPROX_THRESHOLD_PERCENT = 5;
+    if (absPercent < APPROX_THRESHOLD_PERCENT) {
+        return `<div class="stat-delta-row stat-delta-neutral">≈ average</div>`;
+    }
+
+    const isAboveAverage = absoluteDiff > 0;
+    const isGood = isAboveAverage === higherIsBetter;
+    const arrow = isAboveAverage ? "↑" : "↓";
+    const directionLabel = isAboveAverage ? higherLabel : lowerLabel;
+    const formattedAbsDiff = formatFn(Math.abs(absoluteDiff));
+    const sign = isAboveAverage ? "+" : "-";
+
+    /*
+     Saturation scales continuously with |percentDiff| rather than snapping
+     between a few fixed shades, so the magnitude is visually obvious even
+     between two books that are both merely "above average" but by very
+     different amounts. Alpha is clamped to keep the text legible against
+     every theme's background at the extreme end.
+    */
+    const alpha = Math.min(0.95, 0.35 + (absPercent / 100) * 0.6);
+    const colorVar = isGood ? "--stat-good-rgb" : "--stat-bad-rgb";
+    const color = `rgba(var(${colorVar}), ${alpha.toFixed(2)})`;
+
+    // Very large deltas get a slightly bigger, glowing percentage figure so
+    // an extreme outlier catches the eye without needing another color.
+    const VERY_HIGH_THRESHOLD_PERCENT = 75;
+    const emphasisClass = absPercent >= VERY_HIGH_THRESHOLD_PERCENT ? "stat-delta-emphasis" : "";
+
+    return `
+        <div class="stat-delta-row" style="color:${color};">
+            ${arrow} ${escapeHtml(formattedAbsDiff)} ${escapeHtml(directionLabel)} average
+            (<span class="${emphasisClass}">${sign}${absPercent.toFixed(1)}%</span>)
+        </div>
+    `;
+}
+
+/*
+ Builds one <tr> for the per-book stats table, including the "delta from
+ average" line under each of the four comparable stat cells (Time Spent,
+ Pages per Hour, Completion Duration, Pages per Day). Split out from the
+ main loop in showStatsViewState() since it needs statAverages, which isn't
+ known until every book has been visited once - see perBookMetrics there.
+*/
+function buildStatsRowHtml(m, statAverages) {
+    const pagesPerHourDisplay = m.pagesPerHour !== null ? `${m.pagesPerHour.toFixed(1)} p/h` : "—";
+
+    const timeSpentDelta = buildStatDeltaHtml(
+        m.mins > 0 ? m.mins : null, statAverages.timeSpentMins,
+        formatMinutes, "longer than", "shorter than", true, // higher time spent isn't "bad", just framed as longer/shorter below
+    );
+    const pagesPerHourDelta = buildStatDeltaHtml(
+        m.pagesPerHour, statAverages.pagesPerHour,
+        (v) => `${v.toFixed(1)} p/h`, "faster than", "slower than", true,
+    );
+    const completionDurationDelta = buildStatDeltaHtml(
+        m.completionDurationMs, statAverages.completionDurationMs,
+        formatCompletionDuration, "slower than", "faster than", false, // shorter completion duration is the "good" direction
+    );
+    const pagesPerDayDelta = buildStatDeltaHtml(
+        m.pagesPerDay, statAverages.pagesPerDay,
+        (v) => `${v.toFixed(1)} pages/day`, "above", "below", true,
+    );
+
+    return `
+        <tr style="border-bottom: 1px solid var(--border);">
+            <td style="padding:12px;">${escapeHtml(m.book.title)}</td>
+            <td style="padding:12px; color:var(--accent);">${m.isRead ? "✅ Completed" : "📖 In Progress"}</td>
+            <td style="padding:12px;">${m.pagesRead} / ${m.totalPages || "—"} pages</td>
+            <td style="padding:12px;">${formatMinutes(m.mins)}${timeSpentDelta}</td>
+            <td style="padding:12px;">${pagesPerHourDisplay}${pagesPerHourDelta}</td>
+            <td style="padding:12px;">${formatCompletionDuration(m.completionDurationMs)}${completionDurationDelta}</td>
+            <td style="padding:12px;">${m.pagesPerDay !== null ? `${m.pagesPerDay.toFixed(1)} p/day` : "—"}${pagesPerDayDelta}</td>
+        </tr>
+    `;
+}
+
+// =================================================================
 // GLOBAL READING STATS VIEW LAYOUT ROUTER CONTROLLER
 // =================================================================
 async function showStatsViewState() {
@@ -640,7 +771,17 @@ async function showStatsViewState() {
     */
     const allRealSessionDurationsMins = [];
 
-    const rowTemplates = [];
+    /*
+     Raw per-book metric values, collected during the single pass below and
+     turned into table rows only afterward (see the second pass right after
+     this loop) - the "delta from average" comparisons need the full-dataset
+     averages, which aren't known until every book has been visited, so row
+     HTML can't be finalized until this loop is done. Keeping this as a flat
+     array of plain values (rather than re-deriving them a second time) means
+     the delta pass reuses the exact same numbers already computed here
+     instead of duplicating any of the calculations above.
+    */
+    const perBookMetrics = [];
 
     // Loop through memory records - all numbers below come straight off
     // each book's cached fields, no EPUB is opened here.
@@ -735,7 +876,6 @@ async function showStatsViewState() {
         globalTotalWordsRead += wordsRead;
 
         const mins = Math.round((book.timeSpentSeconds || 0) / 60);
-        const pagesPerHour = mins > 0 ? (pagesRead / mins * 60).toFixed(1) : "—";
         if (mins > 0) timedPagesRead += pagesRead;
 
         /*
@@ -752,22 +892,33 @@ async function showStatsViewState() {
             });
         }
 
-        // Save row layout string reference
-        rowTemplates.push(`
-        <tr style="border-bottom: 1px solid var(--border);">
-            <td style="padding:12px;">${escapeHtml(book.title)}</td>
-            <td style="padding:12px; color:var(--accent);">${isRead ? "✅ Completed" : "📖 In Progress"}</td>
-            <td style="padding:12px;">${pagesRead} / ${totalPages || "—"} pages</td>
-            <td style="padding:12px;">${formatMinutes(mins)}</td>
-            <td style="padding:12px;">${pagesPerHour === "—" ? "—" : `${pagesPerHour} p/h`}</td>
-            <td style="padding:12px;">${formatCompletionDuration(completionDurationMs)}</td>
-            <td style="padding:12px;">${pagesPerDay !== null ? `${pagesPerDay.toFixed(1)} p/day` : "—"}</td>
-        </tr>
-        `);
+        // Stash this book's raw metric values instead of building its row
+        // string right now - see perBookMetrics comment above.
+        perBookMetrics.push({
+            book,
+            isRead,
+            pagesRead,
+            totalPages,
+            mins,
+            pagesPerHour: mins > 0 ? (pagesRead / mins * 60) : null, // numeric, not the "—"-formatted string used in the old inline template
+            completionDurationMs,
+            pagesPerDay,
+        });
     }
 
+    /*
+     Averages used for the per-book "delta from average" comparisons (Time
+     Spent, Pages per Hour, Completion Duration, Pages per Day). Deliberately
+     computed from perBookMetrics rather than re-walking loadedBooksMemory:
+     the qualifying condition for each metric ("has valid data") is exactly
+     "this book contributed a non-null value to perBookMetrics", so reusing
+     that array keeps the qualifying logic in one place (the main loop above)
+     instead of redefining it a second time here. See computeStatAverages().
+    */
+    const statAverages = computeStatAverages(perBookMetrics);
+
     // Flush table rows inside dashboard
-    tbody.innerHTML = rowTemplates.join("");
+    tbody.innerHTML = perBookMetrics.map(m => buildStatsRowHtml(m, statAverages)).join("");
 
     // --- MATH COMPILATIONS & UI UPDATES ---
     const totalMins = Math.round(combinedSecondsTracked / 60);

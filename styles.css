@@ -9,6 +9,14 @@
     --accent-dim: rgba(247, 200, 166, 0.2);
     --border: #443b31;
     --card-dimension-width: 160px;
+    /* Base RGB triples (no rgba() wrapper) for the stat-delta comparisons in
+       the per-book stats table - see .stat-delta-* below. Kept as raw
+       "r, g, b" so JS can build rgba(var(--stat-good-rgb), <alpha>) strings
+       with a magnitude-driven alpha instead of needing a fixed palette of
+       preset shades. One pair per theme block, same as the other theme
+       colors above, so the delta text stays legible against every theme. */
+    --stat-good-rgb: 96, 200, 120;
+    --stat-bad-rgb: 224, 100, 100;
 }
 
 [data-theme="oled"] {
@@ -20,6 +28,8 @@
     --accent: #bb86fc;
     --accent-dim: rgba(187, 134, 252, 0.2);
     --border: #222222;
+    --stat-good-rgb: 100, 220, 130;
+    --stat-bad-rgb: 235, 95, 95;
 }
 
 [data-theme="sepia"] {
@@ -31,6 +41,8 @@
     --accent: #a0522d;
     --accent-dim: rgba(160, 82, 45, 0.2);
     --border: #d3c29d;
+    --stat-good-rgb: 60, 130, 70;
+    --stat-bad-rgb: 165, 55, 45;
 }
 
 ::-webkit-scrollbar {
@@ -1056,6 +1068,36 @@ footer {
 .table-header-row {
     background: var(--bg-sidebar);
     border-bottom: 1px solid var(--border);
+}
+
+/* =================================================================
+   PER-BOOK "DELTA FROM AVERAGE" COMPARISONS (stats table)
+   Rendered underneath the existing Time Spent / Pages per Hour /
+   Completion Duration / Pages per Day cells - see buildStatDeltaHtml()
+   in 09-stats-and-context-menu.js. Colors are intentionally driven by
+   inline rgba(var(--stat-good-rgb/--stat-bad-rgb), alpha) strings rather
+   than fixed classes, since the saturation needs to scale continuously
+   with how far a book is from the average rather than snapping between
+   a handful of preset shades.
+   ================================================================= */
+.stat-delta-row {
+    font-size: 12px;
+    margin-top: 3px;
+    line-height: 1.3;
+}
+
+.stat-delta-neutral {
+    color: var(--text-muted);
+}
+
+/* Applied (via JS, alongside an inline color) once a delta's magnitude
+   crosses the "very high" threshold - see buildStatDeltaHtml(). Bumps the
+   percentage figure up slightly and gives it a soft glow so an extreme
+   outlier catches the eye without needing yet another color. */
+.stat-delta-emphasis {
+    font-size: 13px;
+    font-weight: 700;
+    text-shadow: 0 0 6px currentColor;
 }
 
 /* --- Reader settings sidebar --- */
