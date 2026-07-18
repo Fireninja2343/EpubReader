@@ -152,7 +152,7 @@ select {
 #app-container {
     flex: 1;
     position: relative;
-    overflow: hidden;
+    overflow: scroll;
     min-height: 0; /* Lets this shrink properly inside the flex column when the header wraps to multiple rows */
 }
 
