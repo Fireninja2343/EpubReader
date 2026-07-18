@@ -226,15 +226,146 @@ function aggregateReadingHistoryByLocalDay(books) {
 // -----------------------------------------------------------------
 // CALENDAR HEATMAP RENDERING
 // -----------------------------------------------------------------
-const HEATMAP_WEEKS_TO_SHOW = 53; // ~a full year, same span GitHub's graph defaults to
-const HEATMAP_LEVEL_THRESHOLDS = [0, 0.15, 0.4, 0.7, 1]; // fraction-of-max cutoffs for levels 0-4
+/*
+ Responsive week-count sizing. All knobs live here so the behavior is easy
+ to retune later without touching the layout logic itself:
 
-function heatmapLevelForSeconds(seconds, maxSeconds) {
-    if (!seconds || seconds <= 0 || maxSeconds <= 0) return 0;
-    const fraction = seconds / maxSeconds;
+   - HEATMAP_MAX_WEEKS is the ceiling - 2 years is shown whenever there's room for it,
+     and we never show more than this even on ultra-wide screens.
+   - HEATMAP_MIN_WEEKS is the floor - below this the grid stops shrinking
+     and the scroll-wrapper's horizontal scroll takes over instead, so the
+     calendar never becomes so compressed it's unreadable.
+   - HEATMAP_CELL_PX/HEATMAP_GAP_PX mirror the actual rendered cell size
+     and gap (--heatmap-cell-size in styles.css, and the grid `gap`), used
+     as fallbacks if those can't be read live from CSS - see
+     getHeatmapCellMetrics() below, which reads the real values first so a
+     future change to --heatmap-cell-size doesn't silently desync this math.
+*/
+const HEATMAP_MAX_WEEKS = 106;
+const HEATMAP_MIN_WEEKS = 8; // never shrink below ~2 months before handing off to horizontal scroll
+const HEATMAP_CELL_PX = 12; // fallback if --heatmap-cell-size can't be read from CSS
+const HEATMAP_GAP_PX = 3; // fallback if the grid gap can't be read from CSS
+const HEATMAP_LEVEL_THRESHOLDS = [0, 0.15, 0.4, 0.7, 1]; // fraction-of-reference cutoffs for levels 0-4
+/*
+ What fraction-of-max scaling used to key everything off a single day's
+ total is exactly the failure mode called out for the Book Length/Reading
+ Speed distributions above (see buildDynamicBuckets' comment) - one
+ unusually long reading day (a rainy Sunday marathon, a holiday) becomes
+ the sole yardstick every other day is measured against, silently
+ compressing a library's worth of genuinely solid reading days down into
+ low heat levels because none of them come close to that one outlier.
+
+ The fix mirrors the same Tukey's-fence-style approach already used there:
+ instead of scaling against the true max, scale against a high percentile
+ of the (non-zero) day totals - HEATMAP_REFERENCE_PERCENTILE below. A small
+ number of extreme days above that percentile don't move the scale at all;
+ they just land past fraction 1.0 and get clamped to the top level like
+ any other day that clears it, the same way an outlier still gets tallied
+ into a distribution's first/last bucket rather than stretching every
+ bucket's width. This is percentile-based (data-driven) rather than a
+ hardcoded seconds value, so it keeps working correctly regardless of
+ whether someone reads 20 minutes or 5 hours on a typical day.
+*/
+const HEATMAP_REFERENCE_PERCENTILE = 0.9;
+const HEATMAP_MIN_DAYS_FOR_PERCENTILE_REFERENCE = 5;
+// below this, not enough days to make a percentile meaningful over the true max - see computeHeatmapReferenceSeconds()
+
+/*
+ Computes the "fully lit" reference value day totals are scaled against.
+ Uses the same percentile() helper and small-sample fallback pattern as
+ buildDynamicBuckets() in 09-stats-and-context-menu.js: with very few
+ recorded days, a percentile isn't meaningfully different from (and can
+ even sit below) the true max, so this just uses the max directly until
+ there's enough data for the percentile to be doing real outlier-resistant
+ work instead of arbitrarily discarding the only data available.
+*/
+function computeHeatmapReferenceSeconds(dayTotals) {
+    const nonZero = dayTotals.filter((s) => s > 0).sort((a, b) => a - b);
+    if (nonZero.length === 0) return 0;
+    if (nonZero.length < HEATMAP_MIN_DAYS_FOR_PERCENTILE_REFERENCE) return nonZero[nonZero.length - 1];
+
+    const reference = percentile(nonZero, HEATMAP_REFERENCE_PERCENTILE);
+    // A percentile can legitimately land at/near 0 if the bulk of days are
+    // very light with a handful of much heavier ones - guard against that
+    // degenerate case the same way buildDynamicBuckets guards a
+    // zero-width fenced range, by falling back to the true max instead of
+    // producing a reference so small nearly everything clips to level 4.
+    return reference > 0 ? reference : nonZero[nonZero.length - 1];
+}
+
+/*
+ Reads the real cell size and gap from CSS custom properties/computed
+ style where available, falling back to the constants above. Keeping this
+ as its own function means the CSS is still the single source of truth for
+ how a cell actually looks - this only asks "how wide is that, in px?".
+*/
+function getHeatmapCellMetrics(container) {
+    let cellPx = HEATMAP_CELL_PX;
+    let gapPx = HEATMAP_GAP_PX;
+    try {
+        const styles = getComputedStyle(container);
+        const cellVar = styles.getPropertyValue("--heatmap-cell-size").trim();
+        if (cellVar) {
+            const parsed = parseFloat(cellVar);
+            if (!Number.isNaN(parsed)) cellPx = parsed;
+        }
+        const grid = container.querySelector(".heatmap-grid");
+        if (grid) {
+            const gridStyles = getComputedStyle(grid);
+            const gapVal = parseFloat(gridStyles.columnGap || gridStyles.gap);
+            if (!Number.isNaN(gapVal)) gapPx = gapVal;
+        }
+    } catch (e) {
+        // Fall through to defaults - a metrics read failure should never
+        // block rendering the calendar itself.
+    }
+    return { cellPx, gapPx };
+}
+
+/*
+ Figures out how many weeks to render given the container's current
+ available width. Uses the container's own clientWidth (not the window's)
+ so this keeps working correctly regardless of sidebars, padding, or
+ whatever else is squeezing the stats view - it only ever asks "how much
+ room do I actually have right here?".
+*/
+function computeResponsiveHeatmapWeeks(container) {
+    const { cellPx, gapPx } = getHeatmapCellMetrics(container);
+    const availableWidth = container.clientWidth || container.getBoundingClientRect().width || 0;
+
+    if (availableWidth <= 0) return HEATMAP_MAX_WEEKS; // no measurement yet (e.g. hidden tab) - default to a full year
+
+    // Solve availableWidth = weeks*cellPx + (weeks-1)*gapPx for weeks.
+    const weeksThatFit = Math.floor((availableWidth + gapPx) / (cellPx + gapPx));
+
+    return Math.max(HEATMAP_MIN_WEEKS, Math.min(HEATMAP_MAX_WEEKS, weeksThatFit));
+}
+
+// One shared observer that re-renders the calendar whenever its container
+// is resized (window resize, sidebar collapse/expand, font-size zoom,
+// etc.) - set up once and reused rather than recreated on every render.
+let heatmapResizeObserver = null;
+
+function ensureHeatmapResizeObserver(container) {
+    if (heatmapResizeObserver) return;
+    if (typeof ResizeObserver === "undefined") return; // very old browsers just keep the last computed week count
+    heatmapResizeObserver = new ResizeObserver(() => {
+        // Re-render on the next frame so rapid resize events collapse into
+        // a single re-render instead of one per intermediate frame.
+        requestAnimationFrame(renderReadingActivityCalendar);
+    });
+    heatmapResizeObserver.observe(container);
+}
+
+function heatmapLevelForSeconds(seconds, referenceSeconds) {
+    if (!seconds || seconds <= 0 || referenceSeconds <= 0) return 0;
+    const fraction = seconds / referenceSeconds;
     // Walk the thresholds low to high and keep the last one the fraction
     // clears, e.g. fraction=0.5 clears [0, 0.15, 0.4] but not [0.7, 1], so
-    // it resolves to level 3 (index 2 + 1).
+    // it resolves to level 3 (index 2 + 1). A day whose seconds exceed
+    // referenceSeconds (i.e. one of the very outliers this is designed to
+    // be resistant to) simply clears every threshold and clamps to level 4
+    // below, rather than needing its own case.
     let resolved = 1;
     for (let level = 1; level < HEATMAP_LEVEL_THRESHOLDS.length; level++) {
         if (fraction >= HEATMAP_LEVEL_THRESHOLDS[level]) resolved = level + 1;
@@ -256,6 +387,8 @@ function renderReadingActivityCalendar() {
     const container = document.getElementById("reading-activity-calendar-container");
     if (!container) return;
 
+    ensureHeatmapResizeObserver(container);
+
     const byDay = aggregateReadingHistoryByLocalDay(loadedBooksMemory);
     const dayKeys = Object.keys(byDay);
 
@@ -267,20 +400,28 @@ function renderReadingActivityCalendar() {
     const today = new Date();
     const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
 
-    // Grid starts on the Sunday on/before (today - HEATMAP_WEEKS_TO_SHOW weeks)
-    // and always spans exactly HEATMAP_WEEKS_TO_SHOW complete weeks (Sun-Sat),
-    // same as GitHub's - any days after today within the current week are
-    // rendered too, just blanked out as "future", so the grid is always a
-    // clean rectangle instead of an uneven last column.
+    // How many weeks fit in the container's current width - a full year
+    // (HEATMAP_MAX_WEEKS) whenever there's room, fewer on narrow screens,
+    // never below HEATMAP_MIN_WEEKS. Recomputed on every render so a
+    // resize (see ensureHeatmapResizeObserver below) just calls this again.
+    const totalWeeks = computeResponsiveHeatmapWeeks(container);
+
+    // Grid starts on the Sunday on/before (today - totalWeeks weeks) and
+    // always spans exactly totalWeeks complete weeks (Sun-Sat), same as
+    // GitHub's - any days after today within the current week are rendered
+    // too, just blanked out as "future", so the grid is always a clean
+    // rectangle instead of an uneven last column.
     const gridStart = new Date(todayStart);
-    gridStart.setDate(gridStart.getDate() - (HEATMAP_WEEKS_TO_SHOW * 7 - 1));
+    gridStart.setDate(gridStart.getDate() - (totalWeeks * 7 - 1));
     gridStart.setDate(gridStart.getDate() - gridStart.getDay());
 
-    const totalWeeks = HEATMAP_WEEKS_TO_SHOW;
     const totalDays = totalWeeks * 7;
 
-    let maxSeconds = 0;
-    for (const key of dayKeys) maxSeconds = Math.max(maxSeconds, byDay[key].totalSeconds);
+    // Robust "fully lit" reference value - see computeHeatmapReferenceSeconds()
+    // above for why this is a high percentile of day totals rather than the
+    // single highest day.
+    const dayTotals = dayKeys.map((key) => byDay[key].totalSeconds);
+    const referenceSeconds = computeHeatmapReferenceSeconds(dayTotals);
 
     // Month labels: one per week-column whose first (Sunday) day falls in
     // the first seven days of a new month.
@@ -302,7 +443,7 @@ function renderReadingActivityCalendar() {
         const isFuture = dayCursor > todayStart;
         const dayBucket = byDay[dayKey];
         const seconds = dayBucket ? dayBucket.totalSeconds : 0;
-        const level = isFuture ? -1 : heatmapLevelForSeconds(seconds, maxSeconds);
+        const level = isFuture ? -1 : heatmapLevelForSeconds(seconds, referenceSeconds);
 
         dayCells.push(
             `<div class="heatmap-day ${isFuture ? "heatmap-day-future" : `heatmap-level-${level}`}"

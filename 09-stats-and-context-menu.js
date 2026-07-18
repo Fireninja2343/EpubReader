@@ -586,7 +586,75 @@ function computeStatAverages(perBookMetrics) {
         pagesPerHour: mean(pagesPerHourValues),
         completionDurationMs: mean(completionDurationValues),
         pagesPerDay: mean(pagesPerDayValues),
+        // Per-metric adaptive "≈ average" cutoffs - see computeApproxAverageCutoffPercent().
+        // Kept alongside the plain means since both are derived from the
+        // exact same filtered value arrays and both are needed together
+        // wherever a delta gets built.
+        cutoffs: {
+            timeSpentMins: computeApproxAverageCutoffPercent(timeSpentValues),
+            pagesPerHour: computeApproxAverageCutoffPercent(pagesPerHourValues),
+            completionDurationMs: computeApproxAverageCutoffPercent(completionDurationValues),
+            pagesPerDay: computeApproxAverageCutoffPercent(pagesPerDayValues),
+        },
     };
+}
+
+/*
+ Decides, per metric, how large a percent-from-average difference has to be
+ before a book stops reading as "≈ average" - replacing what used to be a
+ single hardcoded APPROX_THRESHOLD_PERCENT (5%) shared by every metric and
+ every library size.
+
+ A fixed 5% cutoff has two failure modes this fixes:
+   - Small datasets: with only 2-3 books, the "average" is really just
+     those same 2-3 books, so almost any difference between them is
+     meaningful - there's no larger population for a small gap to be noise
+     against. The cutoff should shrink as the sample shrinks.
+   - Tightly clustered datasets: a library where every book's pages/hour
+     sits within a few percent of the mean (e.g. 68.4/67.8/64.2 p/h - total
+     spread of just 4.2 p/h) has "5% of the mean" be a wide net relative to
+     how little the data actually varies, so real, dataset-defining
+     differences all get flattened into "average". The cutoff should
+     shrink as the data's own relative spread (coefficient of variation)
+     shrinks.
+
+ Both effects are captured in one data-driven number: the coefficient of
+ variation (stdDev / mean) scaled down by how many samples support it. CV
+ alone captures "how spread out is the data, relative to its own size" -
+ unitless, so it's comparable across metrics with very different scales
+ (minutes vs p/h vs ms). Dividing by sample count on top of that captures
+ "how much do I trust that spread is real dataset structure rather than
+ just being all the data there is" - with only 2-3 books, the 'average' IS
+ those books, so there's no larger population for a small gap to be noise
+ against, and the cutoff needs to shrink sharply (dividing by n rather than
+ the gentler sqrt(n) is what makes that shrink sharp enough to actually
+ separate 68.4/67.8/64.2 instead of still lumping all three together).
+ Clamped to a sensible band so it can never vanish to 0% (any nonzero gap
+ would count) or blow up past a normal "meaningfully different" range on a
+ huge, noisy library.
+*/
+const APPROX_AVERAGE_CUTOFF_MIN_PERCENT = 1; // floor - even maximally-clustered/small data still needs *some* gap to count as different
+const APPROX_AVERAGE_CUTOFF_MAX_PERCENT = 8; // ceiling - never much stricter than the old fixed 5% would allow on a large, naturally spread-out library
+const APPROX_AVERAGE_CUTOFF_SCALE = 2.5; // tunable multiplier translating CV-per-sample into a percent cutoff
+
+function computeApproxAverageCutoffPercent(values) {
+    if (values.length < 2) return APPROX_AVERAGE_CUTOFF_MIN_PERCENT; // no spread is measurable at all with 0-1 points
+
+    const mean = values.reduce((sum, v) => sum + v, 0) / values.length;
+    if (!mean) return APPROX_AVERAGE_CUTOFF_MIN_PERCENT;
+
+    const variance = values.reduce((sum, v) => sum + (v - mean) ** 2, 0) / values.length;
+    const stdDev = Math.sqrt(variance);
+    const coefficientOfVariation = stdDev / Math.abs(mean); // relative spread, unitless
+
+    // Divides by the raw sample count (not sqrt(n)) so a small library's
+    // cutoff shrinks sharply rather than gently - see comment above for why
+    // the gentler sqrt(n) version wasn't sharp enough to split apart a
+    // tightly-clustered 3-book dataset.
+    const cvPerSample = coefficientOfVariation / values.length;
+
+    const cutoff = cvPerSample * 100 * APPROX_AVERAGE_CUTOFF_SCALE;
+    return Math.max(APPROX_AVERAGE_CUTOFF_MIN_PERCENT, Math.min(APPROX_AVERAGE_CUTOFF_MAX_PERCENT, cutoff));
 }
 
 /*
@@ -603,7 +671,7 @@ function computeStatAverages(perBookMetrics) {
  because within that metric one direction is unambiguously the
  "faster/more efficient" one.
 */
-function buildStatDeltaHtml(value, average, formatFn, higherLabel, lowerLabel, higherIsBetter) {
+function buildStatDeltaHtml(value, average, formatFn, higherLabel, lowerLabel, higherIsBetter, approxCutoffPercent) {
     if (value === null || value === undefined || average === null || average === undefined || average === 0) {
         return "";
     }
@@ -612,11 +680,13 @@ function buildStatDeltaHtml(value, average, formatFn, higherLabel, lowerLabel, h
     const percentDiff = (absoluteDiff / average) * 100;
     const absPercent = Math.abs(percentDiff);
 
-    // Within ~5% of average reads as "approximately average" rather than
-    // forcing every book into a strict above/below bucket - a 1% difference
-    // isn't a meaningful comparison, just noise.
-    const APPROX_THRESHOLD_PERCENT = 5;
-    if (absPercent < APPROX_THRESHOLD_PERCENT) {
+    // Within the dataset's own adaptive cutoff of average reads as
+    // "approximately average" rather than forcing every book into a strict
+    // above/below bucket. See computeApproxAverageCutoffPercent() for how
+    // this is derived from the data itself (falls back to 5 if the caller
+    // doesn't supply one, matching the old fixed behavior).
+    const cutoff = typeof approxCutoffPercent === "number" ? approxCutoffPercent : 5;
+    if (absPercent < cutoff) {
         return `<div class="stat-delta-row stat-delta-neutral">≈ average</div>`;
     }
 
@@ -652,6 +722,37 @@ function buildStatDeltaHtml(value, average, formatFn, higherLabel, lowerLabel, h
 }
 
 /*
+ Computes the same four "delta from average" HTML snippets (Time Spent,
+ Pages per Hour, Completion Duration, Pages per Day) for any object shaped
+ like a perBookMetrics entry - i.e. anything with .mins, .pagesPerHour,
+ .completionDurationMs, .pagesPerDay. Pulled out of buildStatsRowHtml so
+ renderReadingSpeedProgression() (the "Reading Speed Over Lifetime" list)
+ can show the exact same four comparisons without re-deriving or
+ duplicating any of this logic - both call sites just pass in an object
+ with those four fields and the shared statAverages.
+*/
+function buildFourMetricDeltas(m, statAverages) {
+    return {
+        timeSpent: buildStatDeltaHtml(
+            m.mins > 0 ? m.mins : null, statAverages.timeSpentMins,
+            formatMinutes, "", "", false, statAverages.cutoffs.timeSpentMins,
+        ),
+        pagesPerHour: buildStatDeltaHtml(
+            m.pagesPerHour, statAverages.pagesPerHour,
+            (v) => `${v.toFixed(1)} p/h`, "", "", true, statAverages.cutoffs.pagesPerHour,
+        ),
+        completionDuration: buildStatDeltaHtml(
+            m.completionDurationMs, statAverages.completionDurationMs,
+            formatCompletionDuration, "", "", false, statAverages.cutoffs.completionDurationMs,
+        ),
+        pagesPerDay: buildStatDeltaHtml(
+            m.pagesPerDay, statAverages.pagesPerDay,
+            (v) => `${v.toFixed(1)} pages/day`, "", "", true, statAverages.cutoffs.pagesPerDay,
+        ),
+    };
+}
+
+/*
  Builds one <tr> for the per-book stats table, including the "delta from
  average" line under each of the four comparable stat cells (Time Spent,
  Pages per Hour, Completion Duration, Pages per Day). Split out from the
@@ -660,33 +761,17 @@ function buildStatDeltaHtml(value, average, formatFn, higherLabel, lowerLabel, h
 */
 function buildStatsRowHtml(m, statAverages) {
     const pagesPerHourDisplay = m.pagesPerHour !== null ? `${m.pagesPerHour.toFixed(1)} p/h` : "—";
-
-    const timeSpentDelta = buildStatDeltaHtml(
-        m.mins > 0 ? m.mins : null, statAverages.timeSpentMins,
-        formatMinutes, "", "", false,
-    );
-    const pagesPerHourDelta = buildStatDeltaHtml(
-        m.pagesPerHour, statAverages.pagesPerHour,
-        (v) => `${v.toFixed(1)} p/h`, "", "", true,
-    );
-    const completionDurationDelta = buildStatDeltaHtml(
-        m.completionDurationMs, statAverages.completionDurationMs,
-        formatCompletionDuration, "", "", false,
-    );
-    const pagesPerDayDelta = buildStatDeltaHtml(
-        m.pagesPerDay, statAverages.pagesPerDay,
-        (v) => `${v.toFixed(1)} pages/day`, "", "", true,
-    );
+    const deltas = buildFourMetricDeltas(m, statAverages);
 
     return `
         <tr style="border-bottom: 1px solid var(--border);">
             <td style="padding:12px;">${escapeHtml(m.book.title)}</td>
             <td style="padding:12px; color:var(--accent);">${m.isRead ? "✅ Completed" : "📖 In Progress"}</td>
             <td style="padding:12px;">${m.pagesRead} / ${m.totalPages || "—"} pages</td>
-            <td style="padding:12px;">${formatMinutes(m.mins)}${timeSpentDelta}</td>
-            <td style="padding:12px;">${pagesPerHourDisplay}${pagesPerHourDelta}</td>
-            <td style="padding:12px;">${formatCompletionDuration(m.completionDurationMs)}${completionDurationDelta}</td>
-            <td style="padding:12px;">${m.pagesPerDay !== null ? `${m.pagesPerDay.toFixed(1)} p/day` : "—"}${pagesPerDayDelta}</td>
+            <td style="padding:12px;">${formatMinutes(m.mins)}${deltas.timeSpent}</td>
+            <td style="padding:12px;">${pagesPerHourDisplay}${deltas.pagesPerHour}</td>
+            <td style="padding:12px;">${formatCompletionDuration(m.completionDurationMs)}${deltas.completionDuration}</td>
+            <td style="padding:12px;">${m.pagesPerDay !== null ? `${m.pagesPerDay.toFixed(1)} p/day` : "—"}${deltas.pagesPerDay}</td>
         </tr>
     `;
 }
@@ -834,9 +919,10 @@ const BOOK_LENGTH_STATIC_BUCKETS = [
 ];
 
 const READING_SPEED_STATIC_BUCKETS = [
-    { min: 0, max: 40, label: "<40 p/h" },
-    { min: 40, max: 60, label: "40\u201360 p/h" },
-    { min: 60, max: 80, label: "60\u201380 p/h" },
+    { min: 0, max: 50, label: "<50 p/h" },
+    { min: 50, max: 60, label: "50\u201360 p/h" },
+    { min: 60, max: 70, label: "60\u201370 p/h" },
+    { min: 70, max: 80, label: "70\u201380 p/h" },
     { min: 80, max: 100, label: "80\u2013100 p/h" },
     { min: 100, max: Infinity, label: "100+ p/h" },
 ];
@@ -1122,6 +1208,11 @@ async function showStatsViewState() {
          Reading Speed Over Lifetime: completed books only, needs both a
          completedDate (for chronological sorting) and tracked reading
          time (timeSpentSeconds > 0, so a division isn't done by zero).
+         Carries the same mins/completionDurationMs/pagesPerDay fields as
+         perBookMetrics below (rather than just pagesPerHour) so this list
+         can reuse buildStatDeltaHtml/buildStatsRowHtml instead of the
+         lifetime view needing its own parallel metric-formatting logic -
+         see renderReadingSpeedProgression().
         */
         if (isRead && book.completedDate && totalPages > 0 && (book.timeSpentSeconds || 0) > 0) {
             const trackedReadingHours = book.timeSpentSeconds / 3600;
@@ -1129,6 +1220,9 @@ async function showStatsViewState() {
                 book,
                 completedDate: book.completedDate,
                 pagesPerHour: totalPages / trackedReadingHours,
+                mins: Math.round(book.timeSpentSeconds / 60),
+                completionDurationMs,
+                pagesPerDay,
             });
         }
 
@@ -1291,7 +1385,7 @@ async function showStatsViewState() {
     }
 
     renderCompletionTimeline(completionsByMonth);
-    renderReadingSpeedProgression(speedProgressionEntries);
+    renderReadingSpeedProgression(speedProgressionEntries, statAverages);
 
     // See 13-reading-history.js. Guarded the same way the other optional
     // stats-view pieces in this function are, so this keeps working whether
@@ -1361,15 +1455,24 @@ function renderCompletionTimeline(completionsByMonth) {
 }
 
 /*
- Renders #stats-reading-speed-progression, showing pages/hour per completed
- book grouped by the month it was completed in and sorted chronologically -
- so the person can see whether their reading speed is trending up or down
- over time, book to book. Deliberately a flat chronological list rather
- than an average-per-month rollup: with typically just a few completions
- per month, showing each book individually is what actually surfaces a
- speed trend. Ends with the single overall average across every entry.
+ Renders #stats-reading-speed-progression, showing full per-book metrics
+ (Time Spent, Pages per Hour, Completion Duration, Pages per Day - the same
+ four shown in the "Individual Breakdown Per Book" table, including their
+ "delta from average" lines) for every completed book, grouped by the month
+ it was completed in and sorted chronologically - so the person can see
+ whether their reading pace is trending up or down over time, book to book.
+ Deliberately a flat chronological list rather than an average-per-month
+ rollup: with typically just a few completions per month, showing each book
+ individually is what actually surfaces a trend. Ends with the single
+ overall average pages/hour across every entry.
+
+ Reuses buildFourMetricDeltas() - the same helper the per-book table above
+ uses - rather than re-implementing the delta/average-comparison logic a
+ second time here; entries carry the same mins/completionDurationMs/
+ pagesPerDay fields as a perBookMetrics row specifically so this works (see
+ where speedProgressionEntries is built in showStatsViewState()).
 */
-function renderReadingSpeedProgression(entries) {
+function renderReadingSpeedProgression(entries, statAverages) {
     const container = document.getElementById("stats-reading-speed-progression");
     if (!container) return;
 
@@ -1400,12 +1503,32 @@ function renderReadingSpeedProgression(entries) {
             .toLocaleDateString(undefined, { month: "long", year: "numeric" });
 
         const rows = byMonth[monthKey]
-            .map((entry) => `
-                <div style="display:flex; justify-content:space-between; padding:2px 0 2px 16px;">
-                    <span>${escapeHtml(entry.book.title)}</span>
-                    <span>${entry.pagesPerHour.toFixed(1)} p/h</span>
-                </div>
-            `)
+            .map((entry) => {
+                const deltas = buildFourMetricDeltas(entry, statAverages);
+                return `
+                    <div style="padding:6px 0 10px 16px; border-bottom:1px dashed var(--border);">
+                        <div style="font-weight:500; margin-bottom:4px;">${escapeHtml(entry.book.title)}</div>
+                        <div class="speed-progression-metrics-grid">
+                            <div>
+                                <div class="speed-progression-metric-label">Time Spent</div>
+                                <div>${formatMinutes(entry.mins)}${deltas.timeSpent}</div>
+                            </div>
+                            <div>
+                                <div class="speed-progression-metric-label">Pages per Hour</div>
+                                <div>${entry.pagesPerHour.toFixed(1)} p/h${deltas.pagesPerHour}</div>
+                            </div>
+                            <div>
+                                <div class="speed-progression-metric-label">Completion Duration</div>
+                                <div>${formatCompletionDuration(entry.completionDurationMs)}${deltas.completionDuration}</div>
+                            </div>
+                            <div>
+                                <div class="speed-progression-metric-label">Pages per Day</div>
+                                <div>${entry.pagesPerDay !== null ? `${entry.pagesPerDay.toFixed(1)} p/day` : "—"}${deltas.pagesPerDay}</div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            })
             .join("");
 
         return `

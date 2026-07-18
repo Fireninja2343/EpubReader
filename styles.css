@@ -1132,6 +1132,29 @@ footer {
     color: var(--text-muted);
 }
 
+/* =================================================================
+   READING SPEED OVER LIFETIME - per-book metrics grid
+   Each completed book's entry in #stats-reading-speed-progression shows
+   the same four metrics as the "Individual Breakdown Per Book" table
+   (Time Spent, Pages per Hour, Completion Duration, Pages per Day),
+   including their delta-from-average lines (.stat-delta-row above) - laid
+   out as a small responsive grid rather than the table's row/column
+   layout, since this view is a flat per-book list rather than a table.
+   See renderReadingSpeedProgression()/buildFourMetricDeltas() in
+   09-stats-and-context-menu.js.
+   ================================================================= */
+.speed-progression-metrics-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 8px 16px;
+}
+
+.speed-progression-metric-label {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-bottom: 2px;
+}
+
 .dist-bar-chart {
     display: flex;
     align-items: flex-end;
