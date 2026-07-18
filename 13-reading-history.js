@@ -332,10 +332,9 @@ function getHeatmapCellMetrics(container) {
 function computeResponsiveHeatmapWeeks(container) {
     const { cellPx, gapPx } = getHeatmapCellMetrics(container);
     const availableWidth = container.clientWidth || container.getBoundingClientRect().width || 0;
+    availableWidth *= 0.95;
+    if (availableWidth <= 0) return HEATMAP_MAX_WEEKS; // no measurement yet (e.g. hidden tab) - defaults to max
 
-    if (availableWidth <= 0) return HEATMAP_MAX_WEEKS; // no measurement yet (e.g. hidden tab) - default to a full year
-
-    // Solve availableWidth = weeks*cellPx + (weeks-1)*gapPx for weeks.
     const weeksThatFit = Math.floor((availableWidth + gapPx) / (cellPx + gapPx));
 
     return Math.max(HEATMAP_MIN_WEEKS, Math.min(HEATMAP_MAX_WEEKS, weeksThatFit));
