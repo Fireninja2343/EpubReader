@@ -152,7 +152,7 @@ select {
 #app-container {
     flex: 1;
     position: relative;
-    overflow: scroll;
+    overflow: hidden;
     min-height: 0; /* Lets this shrink properly inside the flex column when the header wraps to multiple rows */
 }
 
@@ -1047,6 +1047,15 @@ footer {
     color: var(--text-muted);
 }
 
+/* Book-title list inside the Completion Timeline's month/point hover
+   tooltip (see showCompletionMonthTooltip() in 14-completion-timeline.js).
+   Height-capped with internal scroll so a month with many completions
+   grows the scrollbar instead of the tooltip itself running off-screen. */
+.completion-timeline-tooltip-list {
+    max-height: 200px;
+    overflow-y: auto;
+}
+
 .table-wrapper {
     background: var(--bg-card);
     border: 1px solid var(--border);
@@ -1222,6 +1231,274 @@ footer {
     margin-top: 2px;
     text-align: center;
     line-height: 1.3;
+}
+
+/* =================================================================
+   COMPLETION TIMELINE - modular multi-mode system
+   See 14-completion-timeline.js. Mode switcher + one block per mode
+   (month list, calendar, graph, gantt) - all four modes share the same
+   #stats-completion-timeline container and .timeline-container background
+   already established for that section, so only the content beneath the
+   switcher differs between modes.
+   ================================================================= */
+.timeline-mode-switcher {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 14px;
+}
+
+.timeline-mode-btn {
+    background: var(--bg-card);
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 12px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.15s ease-in-out;
+}
+
+.timeline-mode-btn:hover {
+    border-color: var(--accent);
+    color: var(--text-main);
+}
+
+.timeline-mode-btn.active {
+    background: var(--accent-dim);
+    border-color: var(--accent);
+    color: var(--accent);
+    font-weight: 600;
+}
+
+/* --- Mode 1: Month List --- */
+.timeline-month-list-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 6px 4px;
+    border-bottom: 1px solid var(--border);
+    cursor: default;
+}
+
+.timeline-month-list-row:last-child {
+    border-bottom: none;
+}
+
+@media (hover: hover) and (pointer: fine) {
+    .timeline-month-list-row:hover {
+        background: var(--accent-dim);
+        border-radius: 4px;
+    }
+}
+
+/* --- Mode 2: Calendar Timeline --- */
+.timeline-calendar-years {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+}
+
+.timeline-year-block {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 12px;
+}
+
+.timeline-year-heading {
+    font-weight: 700;
+    color: var(--accent);
+    margin-bottom: 10px;
+    font-size: 14px;
+}
+
+/* Prefers a 4-column layout (4x3 for a full 12-month year) whenever
+   there's room, wrapping to fewer columns on narrower screens via
+   auto-fit rather than a hardcoded breakpoint list. */
+.timeline-year-months-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(64px, 1fr));
+    gap: 8px;
+}
+
+.timeline-month-box {
+    border-radius: 4px;
+    padding: 8px 4px;
+    text-align: center;
+    border: 1px solid var(--border);
+}
+
+.timeline-month-box-active {
+    background: var(--accent-dim);
+    cursor: default;
+}
+
+@media (hover: hover) and (pointer: fine) {
+    .timeline-month-box-active:hover {
+        border-color: var(--accent);
+    }
+}
+
+.timeline-month-box-inactive {
+    background: transparent;
+    opacity: 0.4;
+}
+
+.timeline-month-box-label {
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+.timeline-month-box-count {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-main);
+    margin-top: 2px;
+}
+
+/* A year with no completions at all, sitting between two active years -
+   collapses to a single grayed-out placeholder rather than 12 empty boxes. */
+.timeline-year-placeholder {
+    color: var(--text-muted);
+    opacity: 0.5;
+    text-align: center;
+    font-size: 13px;
+    padding: 10px;
+}
+
+/* --- Mode 3: Progress Graph --- */
+.timeline-graph-controls {
+    margin-bottom: 10px;
+}
+
+.timeline-graph-checkbox-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    color: var(--text-muted);
+    cursor: pointer;
+}
+
+.timeline-graph-svg {
+    width: 100%;
+    height: auto;
+    max-height: 320px;
+    overflow: visible;
+}
+
+.timeline-graph-gridline {
+    stroke: var(--border);
+    stroke-width: 1;
+}
+
+.timeline-graph-axis-label {
+    fill: var(--text-muted);
+    font-size: 11px;
+}
+
+.timeline-graph-line {
+    stroke: var(--accent);
+    stroke-width: 2;
+}
+
+.timeline-graph-point {
+    fill: var(--accent);
+    stroke: var(--bg-card);
+    stroke-width: 1.5;
+    cursor: default;
+}
+
+@media (hover: hover) and (pointer: fine) {
+    .timeline-graph-point:hover {
+        fill: var(--text-main);
+    }
+}
+
+.timeline-graph-legend {
+    margin-top: 8px;
+    font-size: 12px;
+    color: var(--text-muted);
+    text-align: center;
+}
+
+/* --- Mode 4: Reading Journey Gantt --- */
+.gantt-container {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: 480px;
+    overflow-y: auto;
+    /* Comfortably scales to larger libraries: rows stay a fixed height
+       (see .gantt-row-track below) and the container scrolls instead of
+       compressing every bar as more books are added. */
+}
+
+.gantt-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.gantt-row-label {
+    flex: 0 0 140px;
+    font-size: 12px;
+    color: var(--text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.gantt-row-track {
+    position: relative;
+    flex: 1;
+    height: 22px;
+    background: color-mix(in srgb, var(--border) 40%, transparent);
+    border-radius: 4px;
+}
+
+.gantt-bar {
+    position: absolute;
+    top: 0;
+    height: 100%;
+    border-radius: 4px;
+    cursor: default;
+    display: flex;
+    align-items: center;
+    overflow: hidden;
+    /* The activity gradient (see buildGanttActivityGradient() in
+       14-completion-timeline.js) is layered as a background-image on top
+       of this solid background color, blended with it rather than drawn
+       flat over it, so the group tint remains visible underneath. */
+    background-blend-mode: overlay;
+    transition: filter 0.15s ease-in-out;
+}
+
+@media (hover: hover) and (pointer: fine) {
+    .gantt-bar:hover {
+        filter: brightness(1.15);
+    }
+}
+
+.gantt-bar-inline-label {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--bg-main);
+    white-space: nowrap;
+    padding: 0 6px;
+    /* Only actually visible once the bar is wide enough to hold it - see
+       the min-width rule below, which hides it below that width so a very
+       short reading period doesn't show a truncated/overflowing label. */
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Applied via JS (see renderTimelineModeGantt() in
+   14-completion-timeline.js) whenever a bar's rendered width is too narrow
+   to hold readable inline text, rather than matched here off the raw
+   inline style string. */
+.gantt-bar-too-narrow .gantt-bar-inline-label {
+    display: none;
 }
 
 /* --- Reader settings sidebar --- */
@@ -1787,14 +2064,6 @@ footer {
         margin: 0 5px;
     }
 
-    /*
-     On a narrow screen the bar itself is much shorter, so the same number
-     of chapter ticks (which can be 70+ for a long book) sit far closer
-     together than on desktop — close enough that the 2px-wide ticks packed
-     at full opacity effectively tile into one solid strip, hiding the
-     colored fill underneath entirely. Thinning and fading them out here
-     keeps them visible as a reference without blotting out the fill.
-    */
     .chapter-tick-marker {
         width: 1px;
         opacity: 0.35;
@@ -1870,13 +2139,6 @@ footer {
         gap: 10px;
     }
 
-    /*
-     On a phone-width bar even 1px-wide ticks are packed tightly enough
-     (a long book's 70-100+ chapters across ~150-200px of actual bar width)
-     to still visually merge into a solid strip. Hiding them outright reads
-     better here than any further thinning would; the progress fill and the
-     footer's numeric percentage remain the source of truth for position.
-    */
     #chapter-ticks-container {
         display: none;
     }

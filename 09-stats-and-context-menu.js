@@ -1384,7 +1384,17 @@ async function showStatsViewState() {
             : "—";
     }
 
-    renderCompletionTimeline(completionsByMonth);
+    /*
+     Completion Timeline now lives in 14-completion-timeline.js as a
+     modular multi-mode system (see buildCompletionTimelineData() there).
+     completionsByMonth computed above still feeds the per-book table's
+     other stats untouched - only the timeline rendering itself moved out.
+     The data object is stashed on window so the mode-switch buttons and
+     hover-tooltip handlers (wired via inline onclick/onmouseenter, which
+     only get the DOM event) can look it back up without recomputing it.
+    */
+    window.__completionTimelineData = buildCompletionTimelineData(loadedBooksMemory);
+    renderCompletionTimeline(window.__completionTimelineData);
     renderReadingSpeedProgression(speedProgressionEntries, statAverages);
 
     // See 13-reading-history.js. Guarded the same way the other optional
@@ -1422,36 +1432,6 @@ async function handleBackfillCompletionDatesClick() {
             button.innerText = "🕓 Backfill Completion Dates";
         }
     }
-}
-
-/*
- Renders a simple month-by-month "books completed" list into
- #stats-completion-timeline, if that container has been added to
- index.html. No charting library involved - just a sorted list of month
- labels and completed counts, built from each book's completedDate.
-*/
-function renderCompletionTimeline(completionsByMonth) {
-    const container = document.getElementById("stats-completion-timeline");
-    if (!container) return;
-
-    const months = Object.keys(completionsByMonth).sort();
-    if (months.length === 0) {
-        container.innerHTML = `<div style="color:var(--text-muted)">No completed books yet.</div>`;
-        return;
-    }
-
-    container.innerHTML = months
-        .map((monthKey) => {
-            const count = completionsByMonth[monthKey];
-            const [year, month] = monthKey.split("-");
-            const label = new Date(Number(year), Number(month) - 1, 1)
-                .toLocaleDateString(undefined, { month: "long", year: "numeric" });
-            return `<div style="display:flex; justify-content:space-between; padding:4px 0;">
-                <span>${escapeHtml(label)}</span>
-                <span>${count} completed</span>
-            </div>`;
-        })
-        .join("");
 }
 
 /*
