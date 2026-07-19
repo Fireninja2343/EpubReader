@@ -358,7 +358,7 @@ async function renderActiveChapterFromZip(zipInstance) {
       frame.classList.remove("fade-out");
     }, 150);
   } catch (err) {
-    frame.innerHTML = `<p style="color:red; text-align:center;">Failed loading chapter element.</p>`;
+    frame.innerHTML = `<p class="text-error-centered">Failed loading chapter element.</p>`;
   }
 }
 

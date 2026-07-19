@@ -1,0 +1,747 @@
+/* =================================================================
+   STATISTICS STYLES
+   Stats view shell, per-book data table, delta-from-average
+   comparisons, library distribution charts, reading-activity heatmap,
+   Reading Speed Over Lifetime, and the Completion Timeline's
+   multi-mode system (list / calendar / graph / gantt).
+   Matches 09-stats-and-context-menu.js, 13-reading-history.js, and
+   14-timeline.js.
+   ================================================================= */
+
+#stats-view, #notes-view {
+    position: relative;
+}
+
+/* --- Stats view --- */
+#stats-view {
+    display: none;
+    flex-direction: column;
+    padding: 30px;
+    gap: 25px;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    height: calc(100vh - 120px);
+    height: calc(100dvh - 120px);
+    z-index: 200;
+    min-height: 0;
+}
+
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 20px;
+}
+
+.stat-metric-card {
+    background: var(--bg-card);
+    padding: 16px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    box-shadow: 2px 2px 15px rgba(0,0,0,0.2);
+}
+
+.stat-label {
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+.stat-value {
+    font-size: 24px;
+    font-weight: bold;
+    color: var(--accent);
+    margin-top: 5px;
+    text-shadow: 2px 2px 6px rgba(0,0,0,0.2);
+}
+
+.long-stat-value{
+    font-size: 16px;
+}
+
+.stat-value-neutral {
+    color: var(--text-main);
+}
+
+.section-heading {
+    margin-top: 20px;
+}
+
+/* Pairs with the shared .flex-between layout class - see the legacy
+   month-by-month renderCompletionTimeline() in
+   09-stats-and-context-menu.js (superseded by the modular multi-mode
+   system in 14-completion-timeline.js, kept here for whichever one ends
+   up wired into index.html). */
+.timeline-month-row {
+    padding: 4px 0;
+}
+
+/* The single-cell "Loading..." placeholder row shown in the stats table
+   body while book metadata is still being fetched - was
+   `style="padding:12px; text-align:center; color:var(--text-muted)"`. */
+.table-loading-cell {
+    padding: 12px;
+    text-align: center;
+    color: var(--text-muted);
+}
+
+/* --- Stats table body cells ---
+   .data-table th already carries padding:12px (see .data-table above);
+   this is the matching rule for its <td>s, which used to each carry their
+   own inline `style="padding:12px;"` in buildStatsRowHtml(). */
+.data-table td {
+    padding: 12px;
+}
+
+.table-body-row {
+    border-bottom: 1px solid var(--border);
+}
+
+/* The "✅ Completed / 📖 In Progress" cell in the per-book stats table -
+   was `style="padding:12px; color:var(--accent);"` inline. */
+.text-accent {
+    color: var(--accent);
+}
+
+/* =================================================================
+   READING ACTIVITY CALENDAR (GitHub-style contribution heatmap)
+   ================================================================= */
+#reading-activity-calendar-container {
+    --heatmap-cell-size: 12px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 16px;
+    color: var(--text-muted);
+}
+
+.heatmap-scroll-wrapper {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 4px;
+}
+
+.heatmap-months-row {
+    display: grid;
+    grid-auto-flow: column;
+    gap: 3px;
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-bottom: 4px;
+    min-width: max-content;
+}
+
+.heatmap-month-label {
+    white-space: nowrap;
+}
+
+.heatmap-grid {
+    display: grid;
+    grid-auto-flow: column;
+    gap: 3px;
+    min-width: max-content;
+}
+
+.heatmap-day {
+    width: var(--heatmap-cell-size);
+    height: var(--heatmap-cell-size);
+    border-radius: 2px;
+    background-color: var(--border);
+    cursor: default;
+}
+
+.heatmap-day-future {
+    background-color: transparent;
+}
+
+.heatmap-level-0 {
+    background-color: var(--border);
+}
+
+.heatmap-level-1 {
+    background-color: color-mix(in srgb, var(--accent) 25%, var(--bg-card));
+}
+
+.heatmap-level-2 {
+    background-color: color-mix(in srgb, var(--accent) 50%, var(--bg-card));
+}
+
+.heatmap-level-3 {
+    background-color: color-mix(in srgb, var(--accent) 75%, var(--bg-card));
+}
+
+.heatmap-level-4 {
+    background-color: var(--accent);
+}
+
+.heatmap-legend {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-top: 10px;
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+.heatmap-legend .heatmap-day {
+    cursor: default;
+}
+
+/* --- Calendar day hover popup (mirrors #book-context-menu positioning) --- */
+.calendar-day-tooltip {
+    display: none;
+    position: absolute;
+    z-index: 1000;
+    background: var(--bg-sidebar);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+    padding: 10px 12px;
+    min-width: 200px;
+    max-width: 280px;
+    font-size: 12px;
+}
+
+.calendar-day-tooltip-heading {
+    font-weight: bold;
+    color: var(--text-main);
+    margin-bottom: 4px;
+}
+
+.calendar-day-tooltip-total {
+    color: var(--accent);
+    margin-bottom: 8px;
+}
+
+.calendar-day-tooltip-row {
+    padding: 4px 0;
+    border-top: 1px solid var(--border);
+}
+
+.calendar-day-tooltip-row:first-of-type {
+    border-top: none;
+}
+
+.calendar-day-tooltip-book-title {
+    color: var(--text-main);
+    font-weight: 600;
+}
+
+.calendar-day-tooltip-book-meta {
+    color: var(--text-muted);
+}
+
+.calendar-day-tooltip-empty {
+    color: var(--text-muted);
+}
+
+/* Book-title list inside the Completion Timeline's month/point hover
+   tooltip (see showCompletionMonthTooltip() in 14-completion-timeline.js).
+   Height-capped with internal scroll so a month with many completions
+   grows the scrollbar instead of the tooltip itself running off-screen. */
+.completion-timeline-tooltip-list {
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.table-wrapper {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    -webkit-overflow-scrolling: touch;
+}
+
+.data-table {
+    width: 100%;
+    border-collapse: collapse;
+    text-align: left;
+    font-size: 14px;
+}
+
+.data-table th {
+    padding: 12px;
+}
+
+.table-header-row {
+    background: var(--bg-sidebar);
+    border-bottom: 1px solid var(--border);
+}
+
+/* =================================================================
+   PER-BOOK "DELTA FROM AVERAGE" COMPARISONS (stats table)
+   Rendered underneath the existing Time Spent / Pages per Hour /
+   Completion Duration / Pages per Day cells - see buildStatDeltaHtml()
+   in 09-stats-and-context-menu.js. Colors are intentionally driven by
+   inline rgba(var(--stat-good-rgb/--stat-bad-rgb), alpha) strings rather
+   than fixed classes, since the saturation needs to scale continuously
+   with how far a book is from the average rather than snapping between
+   a handful of preset shades.
+   ================================================================= */
+.stat-delta-row {
+    font-size: 12px;
+    margin-top: 3px;
+    line-height: 1.3;
+}
+
+.stat-delta-neutral {
+    color: var(--text-muted);
+}
+
+/* Applied (via JS, alongside an inline color) once a delta's magnitude
+   crosses the "very high" threshold - see buildStatDeltaHtml(). Bumps the
+   percentage figure up slightly and gives it a soft glow so an extreme
+   outlier catches the eye without needing yet another color. */
+.stat-delta-emphasis {
+    font-size: 13px;
+    font-weight: 700;
+    text-shadow: 0 0 6px currentColor;
+}
+
+/* =================================================================
+   LIBRARY DISTRIBUTION (Book Length / Reading Status / Reading Speed)
+   Three simple vertical bar charts summarizing library composition - see
+   computeLibraryDistributions()/renderDistributionBarChart() in
+   09-stats-and-context-menu.js. Laid out and card-styled the same way as
+   .stats-grid/.stat-metric-card above, just one card per distribution
+   instead of one card per single number.
+   ================================================================= */
+.distribution-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 18px;
+}
+
+.distribution-card {
+    background: var(--bg-card);
+    padding: 14px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    box-shadow: 2px 2px 15px rgba(0,0,0,0.2);
+}
+
+.distribution-card-title {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-bottom: 12px;
+}
+
+.dist-chart-container {
+    color: var(--text-muted);
+}
+
+/* =================================================================
+   READING SPEED OVER LIFETIME - per-book metrics grid
+   Each completed book's entry in #stats-reading-speed-progression shows
+   the same four metrics as the "Individual Breakdown Per Book" table
+   (Time Spent, Pages per Hour, Completion Duration, Pages per Day),
+   including their delta-from-average lines (.stat-delta-row above) - laid
+   out as a small responsive grid rather than the table's row/column
+   layout, since this view is a flat per-book list rather than a table.
+   See renderReadingSpeedProgression()/buildFourMetricDeltas() in
+   09-stats-and-context-menu.js.
+   ================================================================= */
+.speed-progression-metrics-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 8px 16px;
+}
+
+.speed-progression-metric-label {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-bottom: 2px;
+}
+
+
+.speed-progression-metric-value-row {
+    flex-direction: row;
+    align-items: baseline;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+/* Only the delta line inside this specific wrapper switches to inline -
+    .stat-delta-row everywhere else (the main per-book table, etc.) keeps
+    its normal block layout untouched. */
+.speed-progression-metric-value-row .stat-delta-row {
+    margin-top: 0;
+}
+
+/*
+ "Average" footer at the bottom of Reading Speed Over Lifetime - one row
+ per comparable metric (see FOUR_METRIC_DEFINITIONS/renderReadingSpeedProgression()
+ in 09-stats-and-context-menu.js), replacing what used to be a single
+ hardcoded Pages per Hour line.
+*/
+.speed-progression-average-block {
+    padding-top: 8px;
+    margin-top: 8px;
+    justify-content: space-between;
+    border-top: 1px solid var(--border);
+    display: flex;
+    flex-direction:row;
+}
+
+.speed-progression-average-heading {
+    font-weight: 600;
+    margin-bottom: 4px;
+}
+
+.speed-progression-average-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 2px 0;
+    font-weight: 600;
+}
+
+.speed-progression-average-label {
+    color: var(--text-muted);
+    font-weight: 500;
+    padding: 0 10px;
+}
+
+.speed-progression-average-value {
+    font-weight: 600;
+}
+
+/*
+ One month's worth of entries in the Reading Speed Over Lifetime list -
+ was `style="padding:6px 0;"` on the month wrapper and
+ `style="font-weight:600; padding:4px 0;"` on its heading, both inline in
+ renderReadingSpeedProgression().
+*/
+.speed-progression-month-section {
+    padding: 6px 0;
+}
+
+.speed-progression-month-heading {
+    font-weight: 600;
+    padding: 4px 0;
+}
+
+/*
+ One book's entry within a month section - was
+ `style="padding:6px 0 10px 16px; border-bottom:1px dashed var(--border);"`
+ on the row and `style="font-weight:500; margin-bottom:4px;"` on the
+ book-title line inside it.
+*/
+.speed-progression-entry-row {
+    padding: 6px 0 10px 16px;
+    border-bottom: 1px dashed var(--border);
+}
+
+.speed-progression-entry-title {
+    font-weight: 500;
+    margin-bottom: 4px;
+}
+
+.dist-bar-chart {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 8px;
+    /* Slightly taller than a single-line layout would need, since
+       .dist-bar-count can now wrap to two lines on narrow columns (see
+       .dist-bar-count) - this keeps the bar track from being squeezed
+       down too far when that happens. */
+    height: 180px;
+}
+
+.dist-bar-column {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-end;
+    flex: 1;
+    height: 100%;
+    min-width: 0; /* lets long labels wrap/shrink instead of forcing the chart wider than its card */
+}
+
+/* The scrollable/growable region a single bar lives in - bar height
+   percentages from renderDistributionBarChart() are relative to this. */
+.dist-bar-track {
+    width: 100%;
+    max-width: 48px;
+    flex: 1;
+    display: flex;
+    align-items: flex-end;
+    background: color-mix(in srgb, var(--border) 40%, transparent);
+    border-radius: 4px 4px 0 0;
+    overflow: hidden;
+}
+
+.dist-bar-fill {
+    width: 100%;
+    background: var(--accent);
+    border-radius: 4px 4px 0 0;
+    transition: height 0.2s ease;
+}
+
+.dist-bar-count {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-main);
+    margin-top: 6px;
+    /*
+     Was nowrap, which let this text spill sideways into the neighboring
+     column once the chart got narrow enough that a column's width dropped
+     below the text's natural width - "3 books (19%)" from one column would
+     visually run into "3 books (19%)" from the next. Wrapping instead lets
+     it break onto a second line ("3 books" / "(19%)") and stay contained
+     within its own column, which is what min-width: 0 on .dist-bar-column
+     was already set up to allow.
+    */
+    white-space: normal;
+    overflow-wrap: break-word;
+    text-align: center;
+}
+
+.dist-bar-label {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-top: 2px;
+    text-align: center;
+    line-height: 1.3;
+}
+
+/* =================================================================
+   COMPLETION TIMELINE - modular multi-mode system
+   See 14-completion-timeline.js. Mode switcher + one block per mode
+   (month list, calendar, graph, gantt) - all four modes share the same
+   #stats-completion-timeline container and .timeline-container background
+   already established for that section, so only the content beneath the
+   switcher differs between modes.
+   ================================================================= */
+.timeline-mode-switcher {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 14px;
+}
+
+.timeline-mode-btn {
+    background: var(--bg-card);
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 12px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.15s ease-in-out;
+}
+
+.timeline-mode-btn:hover {
+    border-color: var(--accent);
+    color: var(--text-main);
+}
+
+.timeline-mode-btn.active {
+    background: var(--accent-dim);
+    border-color: var(--accent);
+    color: var(--accent);
+    font-weight: 600;
+}
+
+/* --- Mode 1: Month List --- */
+.timeline-month-list-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 6px 4px;
+    border-bottom: 1px solid var(--border);
+    cursor: default;
+}
+
+.timeline-month-list-row:last-child {
+    border-bottom: none;
+}
+
+/* --- Mode 2: Calendar Timeline --- */
+.timeline-calendar-years {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+}
+
+.timeline-year-block {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 12px;
+}
+
+.timeline-year-heading {
+    font-weight: 700;
+    color: var(--accent);
+    margin-bottom: 10px;
+    font-size: 14px;
+}
+
+/* Prefers a 4-column layout (4x3 for a full 12-month year) whenever
+   there's room, wrapping to fewer columns on narrower screens via
+   auto-fit rather than a hardcoded breakpoint list. */
+.timeline-year-months-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(64px, 1fr));
+    gap: 8px;
+}
+
+.timeline-month-box {
+    border-radius: 4px;
+    padding: 8px 4px;
+    text-align: center;
+    border: 1px solid var(--border);
+}
+
+.timeline-month-box-active {
+    background: var(--accent-dim);
+    cursor: default;
+}
+
+.timeline-month-box-inactive {
+    background: transparent;
+    opacity: 0.4;
+}
+
+.timeline-month-box-label {
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+.timeline-month-box-count {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-main);
+    margin-top: 2px;
+}
+
+/* A year with no completions at all, sitting between two active years -
+   collapses to a single grayed-out placeholder rather than 12 empty boxes. */
+.timeline-year-placeholder {
+    color: var(--text-muted);
+    opacity: 0.5;
+    text-align: center;
+    font-size: 13px;
+    padding: 10px;
+}
+
+/* --- Mode 3: Progress Graph --- */
+.timeline-graph-controls {
+    margin-bottom: 10px;
+}
+
+.timeline-graph-checkbox-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    color: var(--text-muted);
+    cursor: pointer;
+}
+
+.timeline-graph-svg {
+    width: 100%;
+    height: auto;
+    max-height: 320px;
+    overflow: visible;
+}
+
+.timeline-graph-gridline {
+    stroke: var(--border);
+    stroke-width: 1;
+}
+
+.timeline-graph-axis-label {
+    fill: var(--text-muted);
+    font-size: 11px;
+}
+
+.timeline-graph-line {
+    stroke: var(--accent);
+    stroke-width: 2;
+}
+
+.timeline-graph-point {
+    fill: var(--accent);
+    stroke: var(--bg-card);
+    stroke-width: 1.5;
+    cursor: default;
+}
+
+.timeline-graph-legend {
+    margin-top: 8px;
+    font-size: 12px;
+    color: var(--text-muted);
+    text-align: center;
+}
+
+/* --- Mode 4: Reading Journey Gantt --- */
+.gantt-container {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: 480px;
+    overflow-y: auto;
+    /* Comfortably scales to larger libraries: rows stay a fixed height
+       (see .gantt-row-track below) and the container scrolls instead of
+       compressing every bar as more books are added. */
+}
+
+.gantt-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.gantt-row-label {
+    flex: 0 0 140px;
+    font-size: 12px;
+    color: var(--text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.gantt-row-track {
+    position: relative;
+    flex: 1;
+    height: 22px;
+    background: color-mix(in srgb, var(--border) 40%, transparent);
+    border-radius: 4px;
+}
+
+.gantt-bar {
+    position: absolute;
+    top: 0;
+    height: 100%;
+    border-radius: 4px;
+    cursor: default;
+    display: flex;
+    align-items: center;
+    overflow: hidden;
+    /* The activity gradient (see buildGanttActivityGradient() in
+       14-completion-timeline.js) is layered as a background-image on top
+       of this solid background color, blended with it rather than drawn
+       flat over it, so the group tint remains visible underneath. */
+    background-blend-mode: overlay;
+    transition: filter 0.15s ease-in-out;
+}
+
+.gantt-bar-inline-label {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--bg-main);
+    white-space: nowrap;
+    padding: 0 6px;
+    /* Only actually visible once the bar is wide enough to hold it - see
+       the min-width rule below, which hides it below that width so a very
+       short reading period doesn't show a truncated/overflowing label. */
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Applied via JS (see renderTimelineModeGantt() in
+   14-completion-timeline.js) whenever a bar's rendered width is too narrow
+   to hold readable inline text, rather than matched here off the raw
+   inline style string. */
+.gantt-bar-too-narrow .gantt-bar-inline-label {
+    display: none;
+}

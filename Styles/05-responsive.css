@@ -1,0 +1,243 @@
+/* =================================================================
+   RESPONSIVE OVERRIDES
+   Breakpoint-driven adjustments that intentionally span more than one
+   feature module in a single @media block (e.g. the sub-1100px layout
+   touches the nav, library grid, reader sidebars, stats view, and
+   notes view all at once). Kept together here rather than duplicated
+   across every module file above, so each breakpoint's condition is
+   defined in exactly one place.
+   ================================================================= */
+
+/* Touch screens have no :hover, so the 3-dots trigger needs to just always be visible there */
+@media (hover: none) {
+    .book-action-trigger-dots {
+        opacity: 1;
+        width: 30px;
+        height: 30px;
+    }
+}
+
+/*
+ Expand-on-hover and the tooltip are gated behind (hover: hover) so touch
+ devices — which have no real hover state and would otherwise get a
+ "sticky" expanded segment after every tap — never trigger this. Desktop
+ pointing devices (mouse/trackpad) are the intended audience here.
+*/
+@media (hover: hover) and (pointer: fine) {
+    .chapter-segment:hover {
+        height: 14px;
+        top: -5px;
+        background-color: var(--accent-dim);
+        border-radius: 2px;
+    }
+
+    .chapter-segment:hover .chapter-segment-tooltip {
+        opacity: 1;
+    }
+}
+
+@media (hover: hover) and (pointer: fine) {
+    .heatmap-day:not(.heatmap-day-future):hover {
+        outline: 1px solid var(--text-main);
+        outline-offset: -1px;
+    }
+}
+
+@media (hover: hover) and (pointer: fine) {
+    .timeline-month-list-row:hover {
+        background: var(--accent-dim);
+        border-radius: 4px;
+    }
+}
+
+@media (hover: hover) and (pointer: fine) {
+    .timeline-month-box-active:hover {
+        border-color: var(--accent);
+    }
+}
+
+@media (hover: hover) and (pointer: fine) {
+    .timeline-graph-point:hover {
+        fill: var(--text-main);
+    }
+}
+
+@media (hover: hover) and (pointer: fine) {
+    .gantt-bar:hover {
+        filter: brightness(1.15);
+    }
+}
+
+
+/* ==========================================================================
+   MOBILE / SMALL SCREEN LAYOUT
+   ========================================================================== */
+@media (max-width: 1100px) {
+    header {
+        flex-wrap: wrap;
+        row-gap: 2px;
+        padding: 3px 3px;
+        justify-content: flex-start;
+        font-size: 12px;
+    }
+
+    .nav-group {
+        flex-wrap: wrap;
+        row-gap: 1px;
+        gap: 2px;
+    }
+
+    button, label.btn, select {
+        font-size: 11px;
+        padding: 4px 4px;
+    }
+
+    #current-book-indicator {
+        font-size: 10px;
+        max-width: 160px;
+    }
+
+    #library-view {
+        padding: 12px;
+    }
+
+    .library-grid {
+        grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+        gap: 14px;
+        padding-top: 14px;
+    }
+
+    #reader-container {
+        padding: 24px 5%;
+    }
+
+    /* Table-of-contents and settings panels become full overlays instead of
+       squeezing the reading column down to nothing on a narrow screen */
+    .reader-sidebar {
+        position: fixed;
+        top: 0;
+        bottom: 0;
+        width: 88vw;
+        max-width: 340px;
+        z-index: 50;
+        box-shadow: 0 0 30px rgba(0, 0, 0, 0.6);
+    }
+
+    #toc-sidebar {
+        left: 0;
+    }
+
+    #settings-sidebar {
+        right: 0;
+    }
+
+    .custom-modal {
+        width: 92vw;
+        padding: 18px;
+    }
+
+    /* Prevents iOS Safari from auto-zooming the page when a text/color input is focused */
+    .custom-modal input[type="text"],
+    .custom-modal input[type="color"] {
+        font-size: 16px;
+    }
+
+    footer {
+        padding: 0 6px;
+        font-size: 11px;
+        gap: 3px;
+    }
+
+    #footer-left {
+        gap: 5px;
+    }
+
+    .progress-bar-wrapper {
+        margin: 0 5px;
+    }
+
+    .chapter-tick-marker {
+        width: 1px;
+        opacity: 0.35;
+    }
+
+    #sign-in {
+        right: 10px;
+        bottom: 40px;
+        padding: 5px 10px;
+    }
+
+    #sign-in #sync-status {
+        max-width: 34vw;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    #stats-view {
+        margin-top: 40px;
+        padding: 24px;
+        height: calc(100dvh - 100px);
+    }
+
+    .stat-value {
+        font-size: 16px;
+    }
+    .long-stat-value{
+        font-size: 12px;
+    }
+
+    .dist-bar-chart {
+        height: 140px;
+    }
+
+    .dist-bar-label {
+        font-size: 10px;
+    }
+
+    .dist-bar-count {
+        font-size: 11px;
+    }
+
+    .group-card{
+        padding: 6px;
+    }
+
+    #notes-view {
+        margin-top: 40px;
+        padding: 24px;
+        height: calc(100dvh - 100px);
+    }
+
+    .notes-grid {
+        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+        gap: 10px;
+    }
+
+    .note-tag-section {
+        flex-basis: 500px;
+        min-width: 200px;
+    }
+
+    .speed-progression-metric-value-row {
+    display: flex;
+    flex-direction: column;
+    }
+}
+
+@media (max-width: 420px) {
+    /* On very narrow phones, shorten the always-visible chapter readout so
+       the footer doesn't wrap or overflow */
+    #footer-left {
+        font-size: 10px;
+    }
+
+    .library-grid {
+        grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+        gap: 10px;
+    }
+
+
+    #chapter-ticks-container {
+        display: none;
+    }
+}

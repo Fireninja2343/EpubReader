@@ -1,0 +1,386 @@
+/* =================================================================
+   SHARED / GLOBAL STYLES
+   Root theme variables, reset, page shell (header/nav, view-panel
+   switching), generic buttons/inputs, shared modal chrome, and the
+   cross-cutting utility classes (.flex-*, .hr-divider*, .hidden,
+   .empty-state-message*, .text-error*) used across more than one
+   feature module below.
+   ================================================================= */
+
+:root {
+    --bg-main: #2e1f1e;
+    --bg-sidebar: #251818;
+    --bg-card: #382b25;
+    --text-main: #f4f0de;
+    --text-muted: #c8c5a6;
+    --accent: #e0b16a;
+    --glow: #ffb039;
+    --accent-dim: rgba(247, 200, 166, 0.2);
+    --border: #443b31;
+    --card-dimension-width: 160px;
+    /* Base RGB triples (no rgba() wrapper) for the stat-delta comparisons in
+       the per-book stats table - see .stat-delta-* below. Kept as raw
+       "r, g, b" so JS can build rgba(var(--stat-good-rgb), <alpha>) strings
+       with a magnitude-driven alpha instead of needing a fixed palette of
+       preset shades. One pair per theme block, same as the other theme
+       colors above, so the delta text stays legible against every theme. */
+    --stat-good-rgb: 96, 200, 120;
+    --stat-bad-rgb: 224, 100, 100;
+}
+
+[data-theme="oled"] {
+    --bg-main: #000000;
+    --bg-sidebar: #050505;
+    --bg-card: #111111;
+    --text-main: #e0e0e0;
+    --text-muted: #888888;
+    --accent: #bb86fc;
+    --accent-dim: rgba(187, 134, 252, 0.2);
+    --border: #222222;
+    --stat-good-rgb: 100, 220, 130;
+    --stat-bad-rgb: 235, 95, 95;
+}
+
+[data-theme="sepia"] {
+    --bg-main: #f4ecd8;
+    --bg-sidebar: #e8dfc7;
+    --bg-card: #ebdcb9;
+    --text-main: #5b4636;
+    --text-muted: #8f7663;
+    --accent: #a0522d;
+    --accent-dim: rgba(160, 82, 45, 0.2);
+    --border: #d3c29d;
+    --stat-good-rgb: 60, 130, 70;
+    --stat-bad-rgb: 165, 55, 45;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-sidebar);
+}
+
+/* Handle */
+::-webkit-scrollbar-thumb {
+  background: var(--accent);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--accent-dim);
+}
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+html {
+    /* Prevents iOS from adding extra bounce-scroll chrome on top of our own scroll containers */
+    height: 100%;
+}
+
+body {
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background-color: var(--bg-main);
+    color: var(--text-main);
+    overflow: hidden;
+    height: 100vh;
+    height: 100dvh; /* Accounts for mobile browser toolbars so content isn't hidden behind them */
+    display: flex;
+    flex-direction: column;
+}
+
+/* Top Navbar / Controls */
+header {
+    min-height: 50px;
+    background-color: var(--bg-sidebar);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 10px;
+    z-index: 10;
+    box-shadow: 0 0 100px 20px rgba(0, 0, 0, .4);
+    flex-shrink: 0;
+}
+
+.nav-group {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    white-space: nowrap;
+}
+
+/* Give the title a graceful truncation if it gets too long for small screens */
+#current-book-indicator {
+    font-weight: 600;
+    max-width: 300px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: none;
+}
+
+#current-group-indicator {
+    font-weight: 600;
+    color: var(--group-tint, var(--accent));
+    display: none;
+}
+
+button, label.btn {
+    background-color: var(--bg-card);
+    color: var(--text-main);
+    border: 1px solid var(--border);
+    padding: 6px 4px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 13.5px;
+    display: inline-block;
+    transition: all 0.2s ease-in-out;
+}
+
+button:hover, label.btn:hover {
+    border-color: var(--accent);
+    transform: scale(1.03);
+}
+
+
+select {
+    background-color: var(--bg-card);
+    color: var(--text-main);
+    border: 1px solid var(--border);
+    padding: 6px 4px;
+    border-radius: 4px;
+    outline: none;
+}
+
+/* Main Workspace split into view states */
+#app-container {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+    min-height: 0; /* Lets this shrink properly inside the flex column when the header wraps to multiple rows */
+}
+
+.view-panel {
+    top: 0; left: 0; right: 0; bottom: 0;
+    display: none;
+}
+
+.view-panel.active {
+    display: flex;
+}
+
+input[type="range"] {
+  -webkit-appearance: none; 
+  appearance: none;
+  width: 100%; 
+  height: 16px;
+  background: var(--bg-card);
+  outline: none;
+  opacity: 0.7;
+  -webkit-transition: .2s;
+  transition: opacity .2s;
+}
+
+input[type="range"]:hover {
+  opacity: 1;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 12px;
+  background: var(--accent-dim); 
+  cursor: pointer;
+  border-radius: 4px;
+}
+input[type="range"]::-webkit-slider-thumb:hover {
+    background: var(--accent); 
+}
+input[type="range"]::-moz-range-thumb {
+  width: 16px;
+  height: 12px;
+  background: var(--accent-dim);
+  cursor: pointer;
+}
+
+.btn-next-chapter-action {
+    background-color: var(--accent);
+    color: #000000;
+    font-weight: bold;
+    padding: 10px 24px;
+    border-radius: 6px;
+    border: none;
+}
+
+/* Custom Native Modal Backdrop Overlay Styling */
+.custom-modal {
+    border: 1px solid var(--border);
+    background-color: var(--bg-sidebar);
+    color: var(--text-main);
+    border-radius: 8px;
+    padding: 25px;
+    width: 340px;
+    max-width: 92vw;
+    max-height: 85vh;
+    overflow-y: auto;
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    margin: 0;
+}
+
+.custom-modal::backdrop {
+    background-color: rgba(0, 0, 0, 0.7);
+    backdrop-filter: blur(3px);
+}
+
+.custom-modal input[type="text"] {
+    background-color: var(--bg-card);
+    border: 1px solid var(--border);
+    color: var(--text-main);
+    padding: 10px;
+    border-radius: 4px;
+    font-size: 14px;
+}
+
+/* --- Generic layout helpers --- */
+.flex-between {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.flex-gap8 {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.flex-gap10 {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+}
+
+.full-width-input {
+    width: 100%;
+    box-sizing: border-box;
+}
+
+/* --- Dividers --- */
+.hr-divider {
+    border: 0;
+    border-top: 1px solid var(--border);
+}
+
+.hr-divider-spaced {
+    border: 0;
+    border-top: 1px solid var(--border);
+    margin-bottom: 15px;
+}
+
+.hr-divider-tight {
+    border: 0;
+    border-top: 1px solid var(--border);
+    margin: 5px 0;
+}
+
+/* --- Buttons --- */
+.btn-stats-back {
+    background-color: var(--accent);
+    z-index: 9999;
+    color: #000;
+    font-weight: bold;
+}
+
+.btn-accent {
+    background-color: var(--accent);
+    color: #000;
+    font-weight: bold;
+}
+
+.btn-compact {
+    padding: 6px 16px;
+}
+
+.btn-ghost {
+    background-color: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-main);
+}
+
+/*
+ Shared across the stats view, the reading-activity heatmap, and the
+ completion timeline - every "nothing to show yet" message used to be its
+ own `style="color:var(--text-muted)"` (sometimes with an extra
+ `padding-top`) baked directly into a JS template string. One reusable
+ class instead, so all of those messages look identical and a future one
+ doesn't need its own inline style either.
+*/
+/* For elements whose initial markup starts hidden and are then shown/hidden
+   entirely at runtime via direct style.display toggles in JS (e.g.
+   #btn-open-book in handleGridCardClick(), 04-library-view.js) - replaces
+   a bare `style="display:none;"` in the initial HTML with a class, while
+   leaving the runtime show/hide logic itself untouched. */
+.hidden {
+    display: none;
+}
+
+.empty-state-message {
+    color: var(--text-muted);
+}
+
+.empty-state-message-spaced {
+    color: var(--text-muted);
+    padding-top: 8px;
+}
+
+/* Was `style="color:red"` on the two book-metadata-modal error states in
+   09-stats-and-context-menu.js and the reader's chapter-load failure
+   message in 06-epub-reader.js - a plain hex red rather than a theme
+   variable in the original inline styles, kept as literal red here too
+   (rather than swapped for --stat-bad-rgb) since it's meant to read as an
+   unambiguous hard failure, not a themed comparison color. */
+.text-error {
+    color: red;
+}
+
+.text-error-centered {
+    color: red;
+    text-align: center;
+}
+
+#sign-in {
+    position: fixed;
+    right: 16px;
+    bottom: 45px;
+    z-index: 900;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background-color: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 6px 12px;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+}
+
+#sign-in #sync-status {
+    font-size: 12px;
+    color: var(--text-muted);
+    white-space: nowrap;
+}
+
+#sign-in button {
+    white-space: nowrap;
+}

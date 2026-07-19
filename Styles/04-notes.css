@@ -1,0 +1,336 @@
+/* =================================================================
+   NOTES STYLES
+   Notes page, tag sections, note cards, and the note editor/tag
+   management modals. Matches 12-notes.js.
+   ================================================================= */
+
+/* --- Note context menu (mirrors #book-context-menu) --- */
+#note-context-menu {
+    display: none;
+    position: absolute;
+    z-index: 1000;
+    background: var(--bg-sidebar);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+    padding: 5px 0;
+    min-width: 160px;
+    max-width: 90vw;
+}
+
+/* ==========================================================================
+   NOTES FEATURE
+   ========================================================================== */
+
+/* Floating "Add Note" button that appears near a text selection made while reading */
+.note-selection-trigger-btn {
+    position: fixed;
+    z-index: 1500;
+    background-color: var(--accent);
+    color: #000;
+    font-weight: bold;
+    font-size: 12.5px;
+    border: none;
+    border-radius: 4px;
+    padding: 6px 10px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+    cursor: pointer;
+}
+
+/* --- Notes page --- */
+#notes-view {
+    display: none;
+    flex-direction: column;
+    padding: 30px;
+    gap: 20px;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    height: calc(100vh - 120px);
+    height: calc(100dvh - 120px);
+    z-index: 9;
+    min-height: 0;
+}
+
+.notes-toolbar {
+    display: flex;
+    justify-content: flex-end;
+}
+
+/*
+ Sections used to stack in a single column (flex-direction: column). Now
+ that a collapsed section shrinks down to a thin colored strip instead of
+ disappearing, this is a wrapping row instead: expanded sections claim a
+ wide track, collapsed ones claim a narrow one, and the browser's own
+ flex-wrap packs as many as fit per line - no manual layout math needed.
+ align-items: stretch (the flex default) is what lets a collapsed section
+ stretch to match the row's tallest sibling instead of shrink-wrapping to
+ its own tiny content height.
+*/
+.notes-list-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 20px;
+}
+
+.notes-empty-state {
+    color: var(--text-muted);
+    font-size: 14px;
+    text-align: center;
+    padding: 30px 10px;
+}
+
+
+.note-tag-section {
+    border-left: 3px solid var(--tag-tint, var(--border));
+    padding-left: 15px;
+    box-sizing: border-box;
+    flex: 1 1 800px;
+    min-width: 600px;
+    max-width: 100%;
+    transition: all 0.2s ease-in-out;
+}
+
+.note-tag-section-heading {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--tag-tint, var(--text-main));
+    text-shadow: 0 0 3px rgba(255,255,255,0.15);
+    margin-bottom: 12px;
+    transition: all 0.2s ease-in-out;
+}
+
+.note-tag-collapse-toggle {
+    flex-shrink: 0;
+    cursor: pointer;
+    accent-color: var(--tag-tint, var(--accent));
+}
+
+.note-tag-section-title {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/*
+    Collapsed: the section shrinks to just its colored border-left plus a slim ~40px strip holding the checkbox and title
+    flex: 0 0 auto takes it out of the "grow to fill the row" competition entirely,
+    so several collapsed sections naturally packnnext to each other (each claiming only its own ~40px) instead of each
+    grabbing an even share of the row, which is what lets freed-up horizontal space actually get reused by whatever comes after them.
+    writing-mode flips the heading vertical so the title is still readable top-to-bottom without needing the
+    673px an expanded heading has to work with; text-overflow clips a very long name rather than growing the strip.
+*/
+.note-tag-section.collapsed {
+    flex: 0 0 auto;
+    width: 40px;
+    min-width: 0;
+    padding-left: 8px;
+}
+
+.note-tag-section.collapsed .note-tag-section-heading {
+    writing-mode: vertical-rl;
+    margin-bottom: 0;
+    gap: 6px;
+}
+
+.note-tag-section.collapsed .note-tag-section-title {
+    max-height: 220px;
+}
+
+.notes-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 15px;
+}
+
+.note-card {
+    background-color: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 14px;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    /* min-width: 0 lets this grid item actually shrink to its column's
+       track width instead of being forced wider by unbreakable content
+       inside it (see the overflow-wrap rules on the quote/comment below). */
+    min-width: 0;
+}
+
+.note-card-actions-trigger {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    width: 24px;
+    height: 24px;
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-size: 16px;
+    font-weight: bold;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    cursor: pointer;
+    transition: all 0.2s ease-in-out;
+}
+
+.note-card-actions-trigger:hover {
+    background-color: var(--bg-sidebar);
+    color: var(--accent);
+    transform: scale(1.05);
+}
+
+/* Row of tag pills at the top of a note card - the automatic book tag (if
+   any) always renders first, followed by any manually-assigned tags. */
+.note-card-tags-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding-right: 28px; /* keep clear of the ⋮ actions trigger */
+}
+
+.note-card-tag-pill {
+    display: inline-block;
+    font-size: 11px;
+    line-height: 1.4;
+    padding: 2px 8px;
+    border-radius: 10px;
+    background-color: color-mix(in srgb, var(--tag-tint, var(--text-muted)) 20%, var(--bg-sidebar));
+    color: var(hsl(from var(--tag-tint) calc(h*.9) calc(s*1) calc(l*1.1)), var(--text-muted));
+    border: 1px solid color-mix(in srgb, var(--tag-tint, var(--text-muted)) 45%, transparent);
+    max-width: 100%;
+    overflow-wrap: break-word;
+}
+
+.note-card-book-tag {
+    font-weight: 600;
+}
+
+.note-card-quote {
+    font-size: 14px;
+    line-height: 1.5;
+    border-left: 2px solid var(--accent);
+    padding-left: 10px;
+    color: var(--text-main);
+    overflow-wrap: break-word;
+    word-break: break-word;
+    min-width: 0;
+    transition: max-height 0.3s ease-in-out;
+    max-height: 800px; 
+    overflow: hidden;
+}
+
+.note-card-quote:not(.collapsed) {
+    display: block; 
+    -webkit-line-clamp: none;
+    line-clamp: none;
+}
+
+.note-card-quote.collapsed {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 4;
+    line-clamp: 4;
+    overflow: hidden;
+    max-height: 90px;
+    transition: max-height 0.4s ease-in-out;
+}
+
+.note-card-expand-btn {
+    margin-top: 6px;
+    padding: 0;
+    background: none;
+    border: none;
+    color: var(--accent);
+    cursor: pointer;
+    font-size: 0.9rem;
+    align-self: flex-start;
+    transition: transform 0.15s ease-in-out, text-shadow 0.15s ease-in-out;
+}
+
+.note-card-expand-btn:hover {
+    text-shadow: 0 0 10px var(--accent);
+    transform: scale(1.05);
+}
+
+.note-card-comment {
+    font-size: 13px;
+    color: var(--text-muted);
+    font-style: italic;
+    overflow-wrap: break-word;
+    word-break: break-word;
+    min-width: 0;
+}
+
+/* --- Note editor modal --- */
+.note-editor-textarea {
+    resize: vertical;
+    min-height: 90px;
+    font-family: inherit;
+    background-color: var(--bg-card);
+    border: 1px solid var(--border);
+    color: var(--text-main);
+    padding: 10px;
+    border-radius: 4px;
+    font-size: 14px;
+}
+
+.note-editor-textarea-short {
+    min-height: 50px;
+}
+
+/* Multi-select checkbox list used both in the full note editor and the
+   quick "Move Note (Tag)" picker - lets a note carry any number of tags
+   instead of being limited to a single dropdown selection. */
+.note-editor-tag-checkboxes {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    max-height: 160px;
+    overflow-y: auto;
+    padding: 4px 0;
+}
+
+.note-editor-tag-checkbox-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background-color: var(--bg-card);
+    border: 1px solid color-mix(in srgb, var(--tag-tint, var(--border)) 55%, var(--border));
+    border-radius: 20px;
+    padding: 5px 12px 5px 8px;
+    font-size: 12.5px;
+    cursor: pointer;
+    color: var(--tag-tint, var(--text-main));
+}
+
+/* --- Manage note tags modal --- */
+.note-tag-manage-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    max-height: 300px;
+    overflow-y: auto;
+    margin-bottom: 15px;
+}
+
+.note-tag-manage-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.note-tag-manage-delete-btn {
+    font-size: 16px;
+    font-weight: bold;
+}
+
+.note-tag-add-btn {
+    width: 100%;
+}

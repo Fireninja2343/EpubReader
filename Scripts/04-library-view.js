@@ -13,7 +13,6 @@ function renderLibraryGrid() {
     loadedGroupsMemory.forEach((group) => {
       const card = document.createElement("div");
       card.className = "group-card";
-      card.style.backgroundColor = group.backgroundColor;
       card.style.setProperty("--card-color", group.backgroundColor);
 
       card.addEventListener("dragover", (e) => e.preventDefault());

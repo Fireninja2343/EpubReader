@@ -1,0 +1,389 @@
+/* =================================================================
+   READER STYLES
+   Reader canvas, chapter text frame, progress bar, TOC/settings
+   sidebars, autoscroll bar, context menus, and the sync sign-in widget.
+   Matches 06-epub-reader.js, 07-reader-controls.js, 08-view-router.js,
+   and 11-firebase-sync.js.
+   ================================================================= */
+
+#reader-view{
+    position: absolute;
+}
+
+#reader-container {
+    flex: 1;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: 40px 20%;
+    scroll-behavior: smooth;
+}
+.sidebar-close-btn {
+    background-color: var(--accent);
+    z-index: 9999;
+    color: #000;
+    font-weight: bold;
+}
+/* Settings & Table of Contents Sidebar Panels */
+.reader-sidebar {
+    width: 300px;
+    background-color: var(--bg-sidebar);
+    border-left: 1px solid var(--border);
+    border-right: 1px solid var(--border);
+    display: none;
+    flex-direction: column;
+    padding: 20px;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    z-index: 5;
+    flex-shrink: 0;
+}
+.element-number{
+    text-align: center;
+    text-shadow: #000 1px 1px 10px;
+    font-size: 32px;
+    padding: 0;
+    margin: 0;
+}
+
+.reader-sidebar.active {
+    display: flex;
+}
+
+/* Settings now lives as a sibling of #app-container (rather than nested inside
+   #reader-view) so it can be opened from the library too, not just the reader.
+   It's no longer part of the reader's horizontal sidebar/content/sidebar flex
+   row, so it needs its own fixed overlay positioning to sit correctly regardless
+   of which underlying view (library or reader) happens to be active. */
+#settings-sidebar {
+    position: fixed;
+    top: 0;
+    right: 0;
+    height: 100vh;
+    height: 100dvh;
+    z-index: 950;
+    box-shadow: -4px 0 14px rgba(0, 0, 0, 0.4);
+}
+
+/* Hard-hides an optional reader header button/control the user has toggled
+   off in Settings. Uses !important because the view router (showLibraryState/
+   showReaderState) sets inline display styles directly on some of these same
+   elements, which would otherwise override a plain class-based display:none. */
+.ui-btn-hidden {
+    display: none !important;
+}
+
+.sidebar-heading {
+    font-size: 16px;
+    font-weight: 700;
+    margin-bottom: 10px;
+    margin-top: 10px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--border);
+}
+.ornamental-break-as-text{
+    display:none;
+}
+
+.control-item {
+    margin-bottom: 15px;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.control-item label {
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+.control-item input[type="range"], .control-item select, .control-item input[type="color"] {
+    width: 100%;
+    padding-top: 3px;
+    padding-bottom: 3px;
+    background-color: var(--bg-card);
+    border: 1px solid var(--border);
+    color: var(--text-main);
+    border-radius: 4px;
+}
+
+.toc-list-item {
+    padding: 8px 10px;
+    font-size: 14px;
+    cursor: pointer;
+    border-radius: 4px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    transition: all 0.2s ease-in-out;
+}
+
+.toc-list-item:hover {
+    background-color: var(--bg-card);
+    color: var(--accent);
+}
+
+/* Inline Dynamic Interactive End-of-Chapter Actions Button */
+.chapter-end-banner {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 15px;
+    margin: 0;
+    padding: 10px;
+    border-top: 1px solid var(--border);
+    text-align: center;
+}
+
+.chapter-end-banner span {
+    font-size: 14px;
+    color: var(--text-muted);
+}
+
+/* Native unblocked scroll text frame */
+/* Smooth fade transition for chapter switches */
+#text-render-frame {
+    user-select: text;
+    line-height: 1.6;
+    font-size: 18px;
+    transition: opacity 0.15s ease-in-out;
+    opacity: 1;
+    text-shadow: 0 0 24px rgba(0, 0, 0, 0.7);
+}
+
+/* Class applied programmatically during the layout swap */
+#text-render-frame.fade-out {
+    opacity: 0;
+}
+
+/* Basic standard HTML overrides inside the book contents */
+#text-render-frame p { margin-bottom: 1.5em; text-align: left; }
+#text-render-frame h1, #text-render-frame h2, #text-render-frame h3 { margin: 1em 0 0.5em 0; line-height: 1.2; }
+#text-render-frame img { max-width: 100%; height: auto; display: block; margin: 1em auto; }
+
+/* PERMANENT PERSISTENT PROGRESS FOOTER (No Hover Required) */
+footer {
+    min-height: 35px;
+    background-color: var(--bg-sidebar);
+    border-top: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 20px;
+    font-size: 12px;
+    color: var(--text-muted);
+    z-index: 10;
+    flex-shrink: 0;
+    gap: 10px;
+}
+
+.progress-bar-wrapper {
+    flex: 1;
+    margin: 0 20px;
+    position: relative;
+    display: flex;
+    align-items: center;
+    min-width: 0;
+}
+
+.progress-line {
+    width: 100%;
+    height: 4px;
+    background-color: var(--border);
+    border-radius: 2px;
+    position: relative;
+    box-shadow: 0 0 100px 10px rgba(0, 0, 0, .4);
+}
+
+.progress-fill {
+    height: 100%;
+    background-color: var(--accent);
+    border-radius: 2px;
+    width: 0%;
+}
+/* Progress Split Ticks styling overrides */
+.chapter-tick-marker {
+    position: absolute;
+    top: 0;
+    width: 2px;
+    height: 100%;
+    background-color: var(--bg-sidebar);
+    opacity: 0.7;
+}
+
+/*
+ One invisible hit-target per chapter, sized to that chapter's share of the
+ bar. Sits below the tick separators (see #chapter-segments-container's
+ position in index.html) so the thin divider lines still render on top of
+ it, but this is what actually reacts to hover.
+*/
+#chapter-segments-container {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    top: 0;
+    left: 0;
+}
+
+.chapter-segment {
+    position: absolute;
+    top: 0;
+    height: 100%;
+    box-sizing: border-box;
+}
+
+.chapter-segment-tooltip {
+    position: absolute;
+    bottom: calc(100% + 10px);
+    left: 50%;
+    transform: translateX(-50%);
+    background-color: var(--bg-card);
+    border: 1px solid var(--border);
+    color: var(--text-main);
+    padding: 4px 10px;
+    border-radius: 4px;
+    font-size: 11px;
+    white-space: nowrap;
+    max-width: 50vw;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.12s ease-in-out;
+    z-index: 20;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
+}
+
+#scroll-bar {
+  width: 100px;
+  height: 12px;
+  background: var(--bg-sidebar);
+  margin-top: 8px;
+  overflow: hidden;
+}
+
+#fill {
+  height: 100%;
+  width: 100%;
+  background: var(--accent);
+}
+
+#reader-controls {
+    display: none;
+}
+
+/* --- Reader settings sidebar --- */
+.sidebar-heading-top {
+    margin-top: 25px;
+}
+
+.control-item-top {
+    margin-top: 15px;
+}
+
+#color-picker-wrapper {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    margin-top: 8px;
+    opacity: 0.5;
+    pointer-events: none;
+}
+
+.hint-text {
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+/* --- Footer --- */
+#footer-left {
+    display: flex;
+    gap: 15px;
+    align-items: center;
+    flex-shrink: 0;
+}
+
+.footer-divider {
+    color: var(--text-muted);
+    font-size: 11px;
+}
+
+#chapter-ticks-container {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    top: 0;
+    left: 0;
+    pointer-events: none;
+}
+
+.color-swatch-input {
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+    width: 50px;
+    height: 40px;
+    cursor: pointer;
+    background: none;
+    border: 2px solid transparent;
+    border-radius: 10%;
+    padding: 0;
+}
+
+.color-swatch-input::-webkit-color-swatch-wrapper {
+    padding: 0;
+}
+
+.color-swatch-input::-webkit-color-swatch {
+    border: none;
+    border-radius: 10%;
+}
+
+.color-swatch-input::-moz-color-swatch {
+    border: none;
+    border-radius: 10%;
+}
+
+.modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 25px;
+}
+
+/* --- Book context menu --- */
+#book-context-menu {
+    display: none;
+    position: absolute;
+    z-index: 1000;
+    background: var(--bg-sidebar);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+    padding: 5px 0;
+    min-width: 160px;
+    max-width: 90vw;
+}
+
+.context-item-row {
+    padding: 8px 15px;
+    cursor: pointer;
+    font-size: 13px;
+}
+
+.context-item-danger {
+    color: #ff6c6c;
+}
+
+/* --- Book metrics modal --- */
+#book-metrics-modal {
+    width: 420px;
+}
+
+#metrics-modal-body {
+    font-size: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    max-height: 350px;
+    overflow-y: auto;
+}

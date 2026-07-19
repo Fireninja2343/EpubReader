@@ -1,0 +1,275 @@
+/* =================================================================
+   LIBRARY STYLES
+   Book grid, book cards, group folder cards, and the upload/backup
+   controls that live in the library toolbar. Matches 03-groups.js and
+   04-library-view.js.
+   ================================================================= */
+
+/* LIBRARY VIEW */
+#library-view {
+    flex-direction: column;
+    padding: 30px;
+    overflow-y: scroll;
+    position: absolute;
+    -webkit-overflow-scrolling: touch;
+    /*
+     Tinted while browsing inside a group folder (see enterGroupView() /
+     exitGroupView() in 03-groups.js), which only ever sets the
+     --group-view-tint custom property to a color-mix() expression - never
+     background-color directly - so the actual visual rule (including its
+     default, un-tinted value) lives here in CSS rather than being decided
+     by JS on every call.
+    */
+    background-color: var(--group-view-tint, var(--bg-main));
+}
+
+.library-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(var(--card-dimension-width), 1fr));
+    gap: 25px;
+    padding-top: 20px;
+}
+
+.book-card {
+    background-color: var(--group-tint, var(--bg-card));
+    border: 2px solid hsl(
+        from var(--group-tint)
+        h
+        calc(s*1.5)
+        calc(l*1.5)
+    );
+    border-radius: 6px;
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    cursor: pointer;
+    transition: all 0.2s ease-in-out;
+    position: relative;
+}
+
+.book-card:hover {
+    border-color: 2px solid hsl(
+        from var(--group-tint)
+        h
+        calc(s*2)
+        calc(l*2)
+    );;
+}
+
+.book-card.selected {
+    border-color: var(--accent);
+    background-color: var(--accent-dim);
+}
+
+.book-card.dragging {
+    opacity: 0.4;
+    transform: scale(0.95);
+}
+
+.cover-container {
+    width: 100%;
+    aspect-ratio: 2 / 3;
+    background-color: var(--bg-sidebar);
+    border-radius: 4px;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.cover-container img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.cover-placeholder {
+    font-size: 40px;
+    color: var(--text-muted);
+}
+
+/* Un-truncated Grid Book Title Formatting layout handles */
+.book-title {
+    margin-top: 10px;
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 1.4;
+    text-align: center;
+    color: var(--text-main);
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+    white-space: normal; /* Completely permits vertical text expansion blocks */
+    display: -webkit-box;
+    -webkit-line-clamp: unset;
+    line-clamp: unset;
+    -webkit-box-orient: vertical;
+}
+
+/* 3-Dots Interactive Anchoring Node Trigger Elements Layout */
+/* (position: relative for .book-card is already declared above; this used
+   to be a redundant duplicate .book-card { position: relative } rule.) */
+
+.book-action-trigger-dots {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    width: 26px;
+    height: 26px;
+    background-color: rgba(0,0,0,0.65);
+    color: var(--text-main);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    font-weight: bold;
+    font-size: 14px;
+    z-index: 4;
+    opacity: 0;
+    transition: all 0.2s ease-in-out;
+}
+
+.book-card:hover .book-action-trigger-dots {
+    opacity: 1;
+}
+
+.book-action-trigger-dots:hover {
+    background-color: var(--accent);
+    color: #000000;
+}
+
+/* Context Menu List Items Selection States Hover Maps triggers */
+.context-item-row:hover {
+    background-color: var(--bg-card);
+    color: var(--accent);
+}
+
+/* Custom Visual Rules for Folder Group Cards Layout components */
+.group-card {
+    /*
+     Was `card.style.backgroundColor = group.backgroundColor` set directly
+     from JS (buildBookCardsInLayout in 04-library-view.js), duplicating
+     the --card-color custom property that's also set right beside it and
+     only actually used for the border below. Reading --card-color here
+     too keeps the exact same solid-color card background, but JS now only
+     ever needs to set the one custom property instead of a property and
+     an inline style side-by-side.
+    */
+    background-color: var(--card-color, var(--bg-card));
+    border: 2px solid hsl(
+        from var(--card-color)
+        h
+        calc(s*1.5)
+        calc(l*1.5)
+    );
+    border-radius: 6px;
+    padding: 15px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    cursor: pointer;
+    aspect-ratio: 2 / 3;
+    position: relative;
+    box-sizing: border-box;
+}
+
+.group-card:hover {
+    border-color: hsl(
+        from var(--card-color)
+        h
+        calc(s*2)
+        calc(l*2)
+    );
+}
+
+.group-folder-icon {
+    font-size: 48px;
+    text-align: center;
+    margin-top: 20%;
+}
+
+.group-cover-grid {
+    flex: 1;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-rows: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    min-height: 0;
+    margin-bottom: 12px;
+}
+
+.group-cover-tile {
+    background-color: rgba(0,0,0,0.18);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 4px;
+    overflow: hidden;
+    min-width: 0;
+    min-height: 0;
+}
+
+.group-cover-tile img {
+    width: 100%;
+    height: 100%;
+    display: block;
+    object-fit: cover;
+}
+
+.group-cover-tile-empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-muted);
+    font-size: 20px;
+    font-weight: 700;
+}
+
+.group-meta-container {
+    background: rgba(0,0,0,0.2);
+    padding: 8px;
+    border-radius: 4px;
+}
+
+.group-title {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 14px;
+}
+
+.group-action-row {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 5px;
+}
+
+.group-mini-btn {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-size: 11px;
+    cursor: pointer;
+    padding: 2px;
+}
+
+.group-mini-btn:hover {
+    color: var(--accent);
+}
+
+/* ==========================================================================
+   Migrated inline styles
+   Everything below replaces what used to live in `style="..."` attributes
+   in index.html. Grouped by the section of the page they belong to.
+   ========================================================================== */
+
+/* --- Header / nav --- */
+#btn-back-group {
+    display: none;
+    background-color: var(--bg-card);
+    color: var(--accent);
+}
+
+#epub-uploader,
+#backup-picker {
+    display: none;
+}

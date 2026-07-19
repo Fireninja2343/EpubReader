@@ -7,7 +7,12 @@
     <title>EPUB Reader</title>
     <link rel="manifest" href="manifest.json">
     <link rel="icon" href="icons/favicon.ico">
-    <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="Styles/00-base.css" />
+    <link rel="stylesheet" href="Styles/01-library.css" />
+    <link rel="stylesheet" href="Styles/02-reader.css" />
+    <link rel="stylesheet" href="Styles/03-stats.css" />
+    <link rel="stylesheet" href="Styles/04-notes.css" />
+    <link rel="stylesheet" href="Styles/05-responsive.css" />
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 
     <!-- Firebase (compat build, matches the plain-script style of the rest of the app) -->
@@ -16,21 +21,21 @@
     <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 
-    <script src="00-config.js"></script>
-    <script src="01-state.js" defer></script>
-    <script src="02-db.js" defer></script>
-    <script src="03-groups.js" defer></script>
-    <script src="04-library-view.js" defer></script>
-    <script src="05-drag-drop-and-backup.js" defer></script>
-    <script src="06-epub-reader.js" defer></script>
-    <script src="07-reader-controls.js" defer></script>
-    <script src="08-view-router.js" defer></script>
-    <script src="09-stats-and-context-menu.js" defer></script>
-    <script src="10-utils.js" defer></script>
-    <script src="11-firebase-sync.js" defer></script>
-    <script src="12-notes.js" defer></script>
-    <script src="13-reading-history.js" defer></script>
-    <script src="14-timeline.js" defer></script>
+    <script src="Scripts/00-config.js"></script>
+    <script src="Scripts/01-state.js" defer></script>
+    <script src="Scripts/02-db.js" defer></script>
+    <script src="Scripts/03-groups.js" defer></script>
+    <script src="Scripts/04-library-view.js" defer></script>
+    <script src="Scripts/05-drag-drop-and-backup.js" defer></script>
+    <script src="Scripts/06-epub-reader.js" defer></script>
+    <script src="Scripts/07-reader-controls.js" defer></script>
+    <script src="Scripts/08-view-router.js" defer></script>
+    <script src="Scripts/09-stats-and-context-menu.js" defer></script>
+    <script src="Scripts/10-utils.js" defer></script>
+    <script src="Scripts/11-firebase-sync.js" defer></script>
+    <script src="Scripts/12-notes.js" defer></script>
+    <script src="Scripts/13-reading-history.js" defer></script>
+    <script src="Scripts/14-timeline.js" defer></script>
 </head>
 
 <body>
@@ -41,7 +46,7 @@
             <button id="btn-back-group" onclick="exitGroupView()">
                 ⬅️ Back to Groups
             </button>
-            <button id="btn-open-book" onclick="openSelectedBook()" style="display:none;">
+            <button id="btn-open-book" onclick="openSelectedBook()" class="hidden">
                 📖 Open Selected
             </button>
             <label for="epub-uploader" class="btn" id="upload-label">➕ Import EPUB</label>

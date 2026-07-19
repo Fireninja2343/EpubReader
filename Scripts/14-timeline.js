@@ -158,7 +158,7 @@ function renderCompletionTimeline(data) {
 
     const body = document.getElementById("timeline-mode-body");
     if (data.monthOrder.length === 0) {
-        body.innerHTML = `<div style="color:var(--text-muted); padding-top:8px;">No completed books yet.</div>`;
+        body.innerHTML = `<div class="empty-state-message-spaced">No completed books yet.</div>`;
         return;
     }
 
@@ -434,7 +434,7 @@ function renderTimelineModeGantt(container, data) {
         .sort((a, b) => a.startMs - b.startMs);
 
     if (entries.length === 0) {
-        container.innerHTML = `<div style="color:var(--text-muted)">No completed books yet.</div>`;
+        container.innerHTML = `<div class="empty-state-message">No completed books yet.</div>`;
         return;
     }
 

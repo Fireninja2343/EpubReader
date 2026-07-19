@@ -47,7 +47,11 @@ function deleteGroup(groupId) {
 function enterGroupView(groupId, groupName, colorVal = null) {
   activeGroupFilterId = groupId;
   activeGroupFilterColor = colorVal;
-  document.getElementById("library-view").style.backgroundColor = colorVal ? `color-mix(in srgb, ${colorVal} 12%, var(--bg-main))` : "var(--bg-main)";
+  if (colorVal) {
+    document.getElementById("library-view").style.setProperty("--group-view-tint", `color-mix(in srgb, ${colorVal} 12%, var(--bg-main))`);
+  } else {
+    document.getElementById("library-view").style.removeProperty("--group-view-tint");
+  }
   document.getElementById("current-group-indicator").innerText = `📂 [Group: ${groupName}]`;
   document.getElementById("current-group-indicator").style.display = "inline";
   document.getElementById("current-group-indicator").style.setProperty("--group-tint", colorVal || "");
@@ -59,7 +63,7 @@ function enterGroupView(groupId, groupName, colorVal = null) {
 function exitGroupView() {
   activeGroupFilterId = null;
   activeGroupFilterColor = null;
-  document.getElementById("library-view").style.backgroundColor = "var(--bg-main)";
+  document.getElementById("library-view").style.removeProperty("--group-view-tint");
   document.getElementById("current-group-indicator").style.display = "none";
   document.getElementById("current-group-indicator").style.removeProperty("--group-tint");
   document.getElementById("btn-back-group").style.display = "none";

@@ -391,7 +391,7 @@ function renderReadingActivityCalendar() {
     const dayKeys = Object.keys(byDay);
 
     if (dayKeys.length === 0) {
-        container.innerHTML = `<div style="color:var(--text-muted)">No reading activity recorded yet. This calendar fills in as you read from now on.</div>`;
+        container.innerHTML = `<div class="empty-state-message">No reading activity recorded yet. This calendar fills in as you read from now on.</div>`;
         return;
     }
 
