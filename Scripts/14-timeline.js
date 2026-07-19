@@ -44,17 +44,36 @@
        "2026-01": { count: 2, books: [{id,title}, ...] }
      },
      books: [ ...raw book records that qualify as "completed" (isRead && completedDate) ... ],
+     ganttBooks: [ ...raw book records that qualify for the Gantt mode
+       (completed, in progress, or paused - see getBookReadingStatus() in
+       10-utils.js) ... ],
    }
 
  Deliberately keyed by "YYYY-MM" strings (matching the format already used
  elsewhere in the stats view, e.g. renderReadingSpeedProgression) so any
  future cross-referencing between sections stays trivial.
+
+ ganttBooks is intentionally a separate field from books above rather than
+ widening books itself: modes 1-3 (list/calendar/graph) are fundamentally
+ about "how many books completed in month X" and must stay scoped to
+ completed books only, while mode 4 (Gantt) is the one place that shows
+ individual reading periods and so is the only mode that needs in-progress
+ and paused books too. Books that were never started (see
+ READING_STATUS.NOT_STARTED) are excluded from ganttBooks entirely - an
+ unopened book has no reading period to draw a bar for.
 */
 function buildCompletionTimelineData(books) {
     const completionsByMonth = {};
     const completedBooks = [];
+    const ganttBooks = [];
+    const now = Date.now();
 
     for (const book of books) {
+        const status = getBookReadingStatus(book, now);
+
+        if (status === READING_STATUS.NOT_STARTED) continue;
+        ganttBooks.push(book);
+
         if (!book.isRead || !book.completedDate) continue;
         completedBooks.push(book);
 
@@ -69,7 +88,7 @@ function buildCompletionTimelineData(books) {
 
     const monthOrder = Object.keys(completionsByMonth).sort();
 
-    return { monthOrder, completionsByMonth, books: completedBooks };
+    return { monthOrder, completionsByMonth, books: completedBooks, ganttBooks };
 }
 
 /*
@@ -157,12 +176,28 @@ function renderCompletionTimeline(data) {
     container.innerHTML = switcherHtml;
 
     const body = document.getElementById("timeline-mode-body");
-    if (data.monthOrder.length === 0) {
-        body.innerHTML = `<div class="empty-state-message-spaced">No completed books yet.</div>`;
+    const activeMode = TIMELINE_MODES.find((m) => m.id === activeTimelineModeId) || TIMELINE_MODES[0];
+
+    /*
+     Modes 1-3 (list/calendar/graph) are built entirely from completions,
+     so they stay gated on monthOrder being empty exactly as before. Mode 4
+     (Gantt) now also covers in-progress and paused books - see ganttBooks
+     in buildCompletionTimelineData() - so it has its own, wider condition
+     for "is there anything at all to show" instead of being gated on
+     completions existing.
+    */
+    const isEmpty = activeMode.id === "gantt"
+        ? data.ganttBooks.length === 0
+        : data.monthOrder.length === 0;
+
+    if (isEmpty) {
+        const message = activeMode.id === "gantt"
+            ? "No books started yet."
+            : "No completed books yet.";
+        body.innerHTML = `<div class="empty-state-message-spaced">${message}</div>`;
         return;
     }
 
-    const activeMode = TIMELINE_MODES.find((m) => m.id === activeTimelineModeId) || TIMELINE_MODES[0];
     activeMode.render(body, data);
 }
 
@@ -408,12 +443,17 @@ function showTimelineGraphPointTooltip(event, index) {
 // MODE 4 - READING JOURNEY GANTT TIMELINE
 // =================================================================
 /*
- One horizontal bar per completed book, start = firstOpened, end =
- completedDate. Books without a firstOpened (very old records that predate
- that field, or a manually-edited completedDate with no recorded open)
- fall back to using completedDate for both ends - rendered as a single-day
- sliver rather than being dropped, since "we don't know how long this
- actually took" is still worth showing as a data point on the timeline.
+ One horizontal bar per book that's been started (completed, in progress,
+ or paused - see getBookReadingStatus() in 10-utils.js; never-started books
+ have no reading period and are excluded). The bar's start is the earliest
+ real reading activity found for the book; its end is completedDate for a
+ completed book, or the most recent real activity for an in-progress/paused
+ book (never "now" - a paused book's bar stops exactly where its reading
+ did, since the whole point of Paused is that nothing has happened since).
+
+ Books with no firstOpened and no session/history data at all can't reach
+ this function (getBookReadingStatus() would have called them notStarted),
+ so every entry here has a real start point.
 
  Bar color = the book's group tint if it belongs to a group (mirrors
  --group-tint usage on .book-card in styles.css), otherwise --accent.
@@ -425,16 +465,13 @@ function showTimelineGraphPointTooltip(event, index) {
  book.
 */
 function renderTimelineModeGantt(container, data) {
-    const entries = data.books
-        .map((book) => {
-            const endMs = book.completedDate;
-            const startMs = book.firstOpened && book.firstOpened <= endMs ? book.firstOpened : endMs;
-            return { book, startMs, endMs, hasRealStart: !!(book.firstOpened && book.firstOpened <= endMs) };
-        })
+    const entries = data.ganttBooks
+        .map((book) => buildGanttEntryForBook(book))
+        .filter(Boolean)
         .sort((a, b) => a.startMs - b.startMs);
 
     if (entries.length === 0) {
-        container.innerHTML = `<div class="empty-state-message">No completed books yet.</div>`;
+        container.innerHTML = `<div class="empty-state-message">No books started yet.</div>`;
         return;
     }
 
@@ -459,15 +496,19 @@ function renderTimelineModeGantt(container, data) {
         // to nothing useful - see .gantt-bar-too-narrow in styles.css.
         const tooNarrowForLabel = widthPct < 6;
 
+        const statusClass = `gantt-bar-status-${entry.status}`;
+        const portalMarkers = buildGanttPauseMarkers(entry);
+
         return `
             <div class="gantt-row">
                 <div class="gantt-row-label" title="${escapeHtml(entry.book.title)}">${escapeHtml(entry.book.title)}</div>
                 <div class="gantt-row-track">
-                    <div class="gantt-bar ${tooNarrowForLabel ? "gantt-bar-too-narrow" : ""}"
+                    <div class="gantt-bar ${statusClass} ${tooNarrowForLabel ? "gantt-bar-too-narrow" : ""}"
                          style="left:${leftPct.toFixed(2)}%; width:${widthPct.toFixed(2)}%; background:${barColor}; ${activitySegments}"
                          onmouseenter="showGanttBarTooltip(event, ${i})"
                          onmouseleave="hideCompletionMonthTooltip()">
                         <span class="gantt-bar-inline-label">${escapeHtml(entry.book.title)}</span>
+                        ${portalMarkers}
                     </div>
                 </div>
             </div>
@@ -477,6 +518,168 @@ function renderTimelineModeGantt(container, data) {
     window.__timelineGanttEntries = entries;
 
     container.innerHTML = `<div class="gantt-container">${rows}</div>`;
+}
+
+/*
+ Builds one Gantt entry for a single book, or null if the book somehow has
+ no real start point to anchor a bar to (shouldn't normally happen, since
+ callers only pass books that getBookReadingStatus() already found to have
+ real activity - this is just a defensive fallback for malformed data).
+
+   - startMs: the earliest real reading activity found for the book
+     (readingSessions/readingHistory), falling back to firstOpened for
+     older records that predate per-session tracking.
+   - endMs: completedDate for a completed book; otherwise the most recent
+     real activity found (see getLastRealReadingActivityTimestamp() in
+     10-utils.js) - deliberately NOT "now", so an in-progress book's bar
+     ends at its actual last page turned rather than stretching to today
+     every time the stats view happens to be opened.
+   - pauseGaps: every gap between consecutive activity intervals that's at
+     least Config.Reading.PAUSED_INACTIVITY_THRESHOLD_MS long - see
+     buildGanttPauseMarkers() below, which is what actually turns these
+     into the visible "|...|" portal markers. Built generically as an
+     array so more than one gap is already fully supported today, even
+     though most books will only ever have zero or one.
+*/
+function buildGanttEntryForBook(book) {
+    const status = getBookReadingStatus(book);
+    const intervals = collectGanttActivityIntervals(book);
+
+    let startMs;
+    if (intervals.length > 0) {
+        startMs = intervals[0].start;
+    } else if (book.firstOpened) {
+        startMs = book.firstOpened;
+    } else {
+        return null; // No usable anchor point at all - nothing to draw.
+    }
+
+    let endMs;
+    let hasRealEnd = true;
+    if (status === READING_STATUS.COMPLETED && book.completedDate) {
+        endMs = book.completedDate;
+    } else {
+        const lastActivity = intervals.length > 0
+            ? intervals[intervals.length - 1].end
+            : null;
+        if (lastActivity !== null) {
+            endMs = lastActivity;
+        } else {
+            // No session/history data and not completed - only reachable via
+            // the firstOpened fallback above, so render as a single-day
+            // sliver rather than an end point we don't actually have.
+            endMs = startMs;
+            hasRealEnd = false;
+        }
+    }
+
+    // Guard against a corrupted/edited completedDate landing before the
+    // book's own recorded start - render as a same-day sliver rather than a
+    // negative-width bar.
+    if (endMs < startMs) endMs = startMs;
+
+    const pauseGaps = findGantPauseGaps(intervals);
+
+    return { book, status, startMs, endMs, hasRealStart: true, hasRealEnd, pauseGaps };
+}
+
+/*
+ Merges each book's readingSessions ({start, end}) and readingHistory
+ ({startTimestamp, endTimestamp}) entries into one sorted, non-overlapping
+ list of {start, end} activity intervals. Both arrays can independently
+ record roughly the same time range (a session and its matching history
+ segment are opened/closed together - see continueOrStartReadingSession()/
+ endReadingSession() in 09-stats-and-context-menu.js), so overlapping or
+ touching intervals are merged into one rather than counted as two separate
+ bursts of activity with a fake "gap" of zero between them.
+*/
+function collectGanttActivityIntervals(book) {
+    const raw = [];
+
+    if (Array.isArray(book.readingSessions)) {
+        for (const s of book.readingSessions) {
+            if (typeof s.start === "number" && typeof s.end === "number" && s.end >= s.start) {
+                raw.push({ start: s.start, end: s.end });
+            }
+        }
+    }
+    if (Array.isArray(book.readingHistory)) {
+        for (const h of book.readingHistory) {
+            if (typeof h.startTimestamp === "number" && typeof h.endTimestamp === "number" && h.endTimestamp >= h.startTimestamp) {
+                raw.push({ start: h.startTimestamp, end: h.endTimestamp });
+            }
+        }
+    }
+
+    if (raw.length === 0) return [];
+
+    raw.sort((a, b) => a.start - b.start);
+
+    const merged = [raw[0]];
+    for (let i = 1; i < raw.length; i++) {
+        const current = raw[i];
+        const last = merged[merged.length - 1];
+        if (current.start <= last.end) {
+            // Overlaps or touches the previous interval - extend it instead
+            // of starting a new one.
+            last.end = Math.max(last.end, current.end);
+        } else {
+            merged.push({ ...current });
+        }
+    }
+
+    return merged;
+}
+
+/*
+ Finds every gap between consecutive merged activity intervals that's long
+ enough to count as a real pause (same threshold used by
+ getBookReadingStatus() in 10-utils.js, so a book showing as "Paused"
+ always has at least one gap marker on its own bar, and the two systems
+ can never disagree about what counts as a pause). Returns an array
+ (rather than at most one gap) so a book that's been picked up and set
+ down several times shows every pause, not just the most recent one -
+ today that's most often zero or one entries, but nothing here assumes
+ that's a limit.
+*/
+function findGantPauseGaps(intervals) {
+    const gaps = [];
+    for (let i = 1; i < intervals.length; i++) {
+        const gapStart = intervals[i - 1].end;
+        const gapEnd = intervals[i].start;
+        const gapMs = gapEnd - gapStart;
+        if (gapMs >= Config.Reading.PAUSED_INACTIVITY_THRESHOLD_MS) {
+            gaps.push({ start: gapStart, end: gapEnd });
+        }
+    }
+    return gaps;
+}
+
+/*
+ Renders one pair of "|" portal markers per pause gap in entry.pauseGaps,
+ positioned at the gap's start and end as a percentage of this bar's own
+ width (entry.startMs/entry.endMs, the same reference frame leftPct/widthPct
+ in renderTimelineModeGantt() were computed in - each marker's `left` here
+ is a plain 0-100% within .gantt-bar itself, so no extra positioning
+ arguments are needed beyond the entry). Visually this is meant to read
+ like a portal: the bar "enters" at the left bar of a pair and "exits" at
+ the right one, exactly like how a "portal" would function - the content
+ between the two bars represents time that passed with no reading, not
+ more reading squeezed into the same space.
+*/
+function buildGanttPauseMarkers(entry) {
+    if (!entry.pauseGaps || entry.pauseGaps.length === 0) return "";
+
+    const barSpanMs = Math.max(1, entry.endMs - entry.startMs);
+
+    return entry.pauseGaps.map((gap) => {
+        const startPct = Math.max(0, Math.min(100, ((gap.start - entry.startMs) / barSpanMs) * 100));
+        const endPct = Math.max(0, Math.min(100, ((gap.end - entry.startMs) / barSpanMs) * 100));
+        return `
+            <span class="gantt-pause-portal-marker" style="left:${startPct.toFixed(2)}%;"></span>
+            <span class="gantt-pause-portal-marker" style="left:${endPct.toFixed(2)}%;"></span>
+        `;
+    }).join("");
 }
 
 /*
@@ -549,14 +752,28 @@ function showGanttBarTooltip(event, index) {
 
     const entry = entries[index];
     const startLabel = entry.hasRealStart ? new Date(entry.startMs).toLocaleDateString() : "Unknown";
-    const endLabel = new Date(entry.endMs).toLocaleDateString();
-    const durationLabel = entry.hasRealStart ? formatCompletionDuration(entry.endMs - entry.startMs) : "—";
+
+    // "Completed:" only makes sense for a finished book - an in-progress or
+    // paused book's endMs is its last recorded activity, not a finish date.
+    const endRowLabel = entry.status === READING_STATUS.COMPLETED ? "Completed" : "Last activity";
+    const endLabel = entry.hasRealEnd ? new Date(entry.endMs).toLocaleDateString() : "Unknown";
+    const spanLabel = entry.hasRealStart && entry.hasRealEnd
+        ? formatCompletionDuration(entry.endMs - entry.startMs)
+        : "—";
+
+    const pauseRows = entry.pauseGaps.map((gap) => `
+        <div class="calendar-day-tooltip-row calendar-day-tooltip-book-meta">
+            ⏸️ Paused ${new Date(gap.start).toLocaleDateString()} → ${new Date(gap.end).toLocaleDateString()}
+        </div>
+    `).join("");
 
     tooltip.innerHTML = `
         <div class="calendar-day-tooltip-heading">${escapeHtml(entry.book.title)}</div>
+        <div class="calendar-day-tooltip-row calendar-day-tooltip-book-meta">${escapeHtml(READING_STATUS_LABELS[entry.status])}</div>
         <div class="calendar-day-tooltip-row calendar-day-tooltip-book-meta">Started: ${escapeHtml(startLabel)}</div>
-        <div class="calendar-day-tooltip-row calendar-day-tooltip-book-meta">Completed: ${escapeHtml(endLabel)}</div>
-        <div class="calendar-day-tooltip-row calendar-day-tooltip-book-meta">Duration: ${escapeHtml(durationLabel)}</div>
+        <div class="calendar-day-tooltip-row calendar-day-tooltip-book-meta">${endRowLabel}: ${escapeHtml(endLabel)}</div>
+        <div class="calendar-day-tooltip-row calendar-day-tooltip-book-meta">Span: ${escapeHtml(spanLabel)}</div>
+        ${pauseRows}
     `;
     positionFlyoutMenu(tooltip, event);
 }

@@ -28,6 +28,15 @@ const Config = {
   //One entry is written per uninterrupted reading session, so
   //365 comfortably covers 1 year of daily reading before the oldest entries start rolling off.
     MAX_STORED_HISTORY_ENTRIES_PER_BOOK: 365,
+  /*
+   How long a book can go without any real recorded reading activity
+   (see getBookReadingStatus() in 10-utils.js) before it's considered
+   "Paused" rather than "In Progress" in the stats view and the
+   Completion Timeline's Gantt mode. Configurable here rather than
+   hardcoded in the status-derivation logic itself, so this can be tuned
+   without touching that function.
+  */
+    PAUSED_INACTIVITY_THRESHOLD_MS: 7 * 24 * 60 * 60 * 1000, // Days (*24 -> h *60 -> min *60 -> s *1000 ->ms)
   },
   firebaseConfig: {
     apiKey: "AIzaSyB-lHa5mHi-iMdgGaTe5ehFZE1Xf2T8TkQ",

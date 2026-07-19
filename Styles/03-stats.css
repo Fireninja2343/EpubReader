@@ -745,3 +745,53 @@
 .gantt-bar-too-narrow .gantt-bar-inline-label {
     display: none;
 }
+
+/*
+ Status-based bar treatment - see getBookReadingStatus() in 10-utils.js.
+ .gantt-bar-status-completed intentionally has no rule of its own (it's the
+ original solid-bar look every bar already had, kept as the unmarked
+ default rather than repeating those properties here).
+*/
+.gantt-bar-status-inProgress {
+    /* A soft pulse on the right edge reads as "still going" without
+       needing any extra markup - the bar's own tint color bleeds outward
+       via box-shadow rather than introducing a second color. */
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 60%, transparent);
+    animation: gantt-in-progress-pulse 2.4s ease-in-out infinite;
+}
+
+@keyframes gantt-in-progress-pulse {
+    0%, 100% { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent); }
+    50% { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 75%, transparent); }
+}
+
+.gantt-bar-status-paused {
+    /* Dashed outline + reduced opacity reads as "stalled" at a glance,
+       distinct from both the solid completed bars and the pulsing
+       in-progress ones - the underlying tint/activity-gradient fill stays
+       exactly as-is underneath so a paused book's history is still legible. */
+    opacity: 0.6;
+    outline: 1px dashed color-mix(in srgb, var(--text-main) 50%, transparent);
+    outline-offset: -1px;
+}
+
+/*
+ One "|" portal marker, positioned by JS (buildGanttPauseMarkers() in
+ 14-completion-timeline.js) at each pause gap's start and end. Two markers
+ per gap read as a matched pair of portal endpoints: the bar visually
+ "enters" the left one and "exits" the right one, with the gap between
+ them representing elapsed time with no reading rather than more bar drawn
+ across it - see the Gantt entry's pauseGaps array, which already supports
+ more than one gap per book even though most books only ever have zero or
+ one today.
+*/
+.gantt-pause-portal-marker {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: var(--text-main);
+    box-shadow: 0 0 4px 1px var(--glow);
+    pointer-events: none;
+    z-index: 2;
+}

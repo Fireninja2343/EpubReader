@@ -530,7 +530,7 @@ async function openBookDiagnosticsModal(bookObj, modeType) {
                 <div><strong>Date Indexed Locally:</strong> ${escapeHtml(new Date(bookObj.dateImported).toLocaleString())}</div>
             `;
         } catch (e) {
-            body.innerHTML = `<span class="text-error">Failed extraction profiles.</span>`;
+            body.innerHTML = `<span style="color:red">Failed extraction profiles.</span>`;
         }
         return;
     }
@@ -555,7 +555,7 @@ async function openBookDiagnosticsModal(bookObj, modeType) {
             <div><strong>Active Time Spent Tracker:</strong> ${computedMinutes} continuous minutes</div>
         `;
     } catch (e) {
-        body.innerHTML = `<span class="text-error">Failed extraction profiles.</span>`;
+        body.innerHTML = `<span style="color:red">Failed extraction profiles.</span>`;
     }
 }
 
@@ -816,14 +816,14 @@ function buildStatsRowHtml(m, statAverages) {
     const deltas = buildFourMetricDeltas(m, statAverages);
 
     return `
-        <tr class="table-body-row">
-            <td>${escapeHtml(m.book.title)}</td>
-            <td class="text-accent">${m.isRead ? "✅ Completed" : "📖 In Progress"}</td>
-            <td>${m.pagesRead} / ${m.totalPages || "—"} pages</td>
-            <td>${formatMinutes(m.mins)}${deltas.timeSpent}</td>
-            <td>${pagesPerHourDisplay}${deltas.pagesPerHour}</td>
-            <td>${formatCompletionDuration(m.completionDurationMs)}${deltas.completionDuration}</td>
-            <td>${m.pagesPerDay !== null ? `${m.pagesPerDay.toFixed(1)} p/day` : "—"}${deltas.pagesPerDay}</td>
+        <tr style="border-bottom: 1px solid var(--border);">
+            <td style="padding:12px;">${escapeHtml(m.book.title)}</td>
+            <td style="padding:12px; color:var(--accent);">${READING_STATUS_LABELS[m.status]}</td>
+            <td style="padding:12px;">${m.pagesRead} / ${m.totalPages || "—"} pages</td>
+            <td style="padding:12px;">${formatMinutes(m.mins)}${deltas.timeSpent}</td>
+            <td style="padding:12px;">${pagesPerHourDisplay}${deltas.pagesPerHour}</td>
+            <td style="padding:12px;">${formatCompletionDuration(m.completionDurationMs)}${deltas.completionDuration}</td>
+            <td style="padding:12px;">${m.pagesPerDay !== null ? `${m.pagesPerDay.toFixed(1)} p/day` : "—"}${deltas.pagesPerDay}</td>
         </tr>
     `;
 }
@@ -1045,7 +1045,7 @@ function renderDistributionBarChart(containerId, distribution) {
 
     const { entries, eligibleCount } = distribution;
     if (!eligibleCount || entries.every(e => e.count === 0)) {
-        container.innerHTML = `<div class="empty-state-message">Not enough data yet.</div>`;
+        container.innerHTML = `<div style="color:var(--text-muted)">Not enough data yet.</div>`;
         return;
     }
 
@@ -1081,7 +1081,7 @@ async function showStatsViewState() {
     statsPanel.style.display = "flex";
 
     const tbody = document.getElementById("stats-books-table-body");
-    tbody.innerHTML = `<tr><td colspan="7" class="table-loading-cell">Loading book metadata...</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="7" style="padding:12px; text-align:center; color:var(--text-muted)">Loading book metadata...</td></tr>`;
 
     /*
      Backfills totalPages/totalWords/chapterCount on any book that predates
@@ -1288,6 +1288,14 @@ async function showStatsViewState() {
             // here (rather than re-derived) for the Reading Status
             // distribution's "In Progress" vs "Not Started" split.
             isStarted: book.currentChapter > 0 || book.scrollOffset > 100,
+            // Finer-grained status than isRead/isStarted above - adds
+            // "Paused" (in progress, but no real reading activity for
+            // longer than Config.Reading.PAUSED_INACTIVITY_THRESHOLD_MS) on
+            // top of the existing Completed/In Progress/Not Started split.
+            // See getBookReadingStatus() in 10-utils.js, the single source
+            // of truth this and the Completion Timeline's Gantt mode both
+            // read from.
+            status: getBookReadingStatus(book),
             pagesRead,
             totalPages,
             mins,
@@ -1509,7 +1517,7 @@ function renderReadingSpeedProgression(entries, statAverages) {
     if (!container) return;
 
     if (entries.length === 0) {
-        container.innerHTML = `<div class="empty-state-message">No completed books with tracked reading time yet.</div>`;
+        container.innerHTML = `<div style="color:var(--text-muted)">No completed books with tracked reading time yet.</div>`;
         return;
     }
 
@@ -1538,8 +1546,8 @@ function renderReadingSpeedProgression(entries, statAverages) {
             .map((entry) => {
                 const deltas = buildFourMetricDeltas(entry, statAverages);
                 return `
-                    <div class="speed-progression-entry-row">
-                        <div class="speed-progression-entry-title">${escapeHtml(entry.book.title)}</div>
+                    <div style="padding:6px 0 10px 16px; border-bottom:1px dashed var(--border);">
+                        <div style="font-weight:500; margin-bottom:4px;">${escapeHtml(entry.book.title)}</div>
                         <div class="speed-progression-metrics-grid">
                             <div>
                                 <div class="speed-progression-metric-label">Time Spent</div>
@@ -1564,8 +1572,8 @@ function renderReadingSpeedProgression(entries, statAverages) {
             .join("");
 
         return `
-            <div class="speed-progression-month-section">
-                <div class="speed-progression-month-heading">${escapeHtml(label)}</div>
+            <div style="padding:6px 0;">
+                <div style="font-weight:600; padding:4px 0;">${escapeHtml(label)}</div>
                 ${rows}
             </div>
         `;

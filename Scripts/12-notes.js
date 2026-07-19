@@ -546,7 +546,17 @@ function buildNoteCard(note) {
   if (note.comment) {
     const comment = document.createElement("div");
     comment.className = "note-card-comment";
-    comment.innerText = note.comment;
+    /*
+     innerHTML + renderLightweightMarkdown() (10-utils.js) instead of the
+     plain innerText this used to be - the raw note.comment string itself
+     is never touched (still stored, and still loaded verbatim into the
+     editor's plain <textarea> - see triggerNoteContextAction() above),
+     only how it's *displayed* here changes. renderLightweightMarkdown()
+     escapes all HTML before applying any formatting, so this stays exactly
+     as safe against injected markup as innerText was - a comment containing
+     literal "<img onerror=...>" renders as inert text, not a live tag.
+    */
+    comment.innerHTML = renderLightweightMarkdown(note.comment);
     card.appendChild(comment);
   }
 

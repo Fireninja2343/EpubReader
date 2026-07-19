@@ -268,6 +268,53 @@
     min-width: 0;
 }
 
+/*
+ Formatting produced by renderLightweightMarkdown() (10-utils.js) when
+ displaying a note's comment - see buildNoteCard() in 12-notes.js. Scoped
+ under .note-card-comment specifically, both because that's the only place
+ this renderer's output is ever inserted, and so these rules don't leak
+ into unrelated <code>/<u>/<ul> elements elsewhere in the app.
+*/
+.note-card-comment strong {
+    font-weight: 700;
+    /* Not italic - stands out against the comment's own default italic
+       styling above, rather than just being a slightly-bolder version of
+       the same slant. */
+    font-style: normal;
+    color: var(--text-main);
+}
+
+.note-card-comment code {
+    font-family: ui-monospace, "SF Mono", Consolas, monospace;
+    font-style: normal;
+    background-color: var(--bg-sidebar);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 1px 5px;
+    font-size: 0.92em;
+}
+
+.note-card-comment del {
+    opacity: 0.75;
+}
+
+.note-card-comment u {
+    text-decoration-color: var(--accent);
+}
+
+/* The global reset (* { margin:0; padding:0 } in 00-base.css) would
+   otherwise flatten these to no indentation and no marker spacing at all -
+   restored explicitly just here rather than loosening the global reset. */
+.note-card-comment ul,
+.note-card-comment ol {
+    padding-left: 22px;
+    margin: 4px 0;
+}
+
+.note-card-comment li {
+    margin: 2px 0;
+}
+
 /* --- Note editor modal --- */
 .note-editor-textarea {
     resize: vertical;
