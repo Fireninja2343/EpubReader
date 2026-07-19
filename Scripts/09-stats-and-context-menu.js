@@ -74,7 +74,6 @@ function startActiveReadingTimer() {
         if (readerActive && activeBookObject && document.hasFocus() && !document.hidden && isUserActive) {
             if (!activeBookObject.timeSpentSeconds) activeBookObject.timeSpentSeconds = 0;
             activeBookObject.timeSpentSeconds += (TICK_MS / 1000); // Increments ticker loop heartbeat frequency step bounds
-
             /*
              Batches the DB write to every 30 seconds (15 ticks) instead of every
              tick, to cut down on disk I/O. activeBookObject in RAM stays perfectly
@@ -86,7 +85,6 @@ function startActiveReadingTimer() {
                 saveTimeToDB();
             }
         }
-
         /*
          Session inactivity check runs on every tick regardless of the
          isUserActive gate above (which just pauses time-tracking - a

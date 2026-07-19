@@ -18,7 +18,7 @@ const Config = {
   Sync: {
     FILE_CHUNK_SIZE: 700000,
     CLOUD_PROGRESS_PUSH_INTERVAL_MS: 20000,
-    IDLE_THRESHOLD_MS: 30000,
+    IDLE_THRESHOLD_MS: 20000,
   },
   Reading: {
     SESSION_INACTIVITY_TIMEOUT_MS: 5 * 60 * 1000, //mins * 60(from min->s) * 1000(from s->ms)
