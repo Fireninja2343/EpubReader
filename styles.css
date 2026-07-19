@@ -1164,6 +1164,50 @@ footer {
     margin-bottom: 2px;
 }
 
+
+.speed-progression-metric-value-row {
+    flex-direction: row;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+/* Only the delta line inside this specific wrapper switches to inline -
+    .stat-delta-row everywhere else (the main per-book table, etc.) keeps
+    its normal block layout untouched. */
+.speed-progression-metric-value-row .stat-delta-row {
+    margin-top: 0;
+}
+
+/*
+ "Average" footer at the bottom of Reading Speed Over Lifetime - one row
+ per comparable metric (see FOUR_METRIC_DEFINITIONS/renderReadingSpeedProgression()
+ in 09-stats-and-context-menu.js), replacing what used to be a single
+ hardcoded Pages per Hour line.
+*/
+.speed-progression-average-block {
+    padding-top: 8px;
+    margin-top: 8px;
+    border-top: 1px solid var(--border);
+}
+
+.speed-progression-average-heading {
+    font-weight: 600;
+    margin-bottom: 4px;
+}
+
+.speed-progression-average-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 2px 0;
+    font-weight: 600;
+}
+
+.speed-progression-average-label {
+    color: var(--text-muted);
+    font-weight: 500;
+}
+
 .dist-bar-chart {
     display: flex;
     align-items: flex-end;
@@ -1977,6 +2021,7 @@ footer {
     width: 100%;
 }
 
+
 /* ==========================================================================
    MOBILE / SMALL SCREEN LAYOUT
    ========================================================================== */
@@ -2125,6 +2170,11 @@ footer {
         flex-basis: 500px;
         min-width: 200px;
     }
+
+    .speed-progression-metric-value-row {
+    display: flex;
+    flex-direction: column;
+    }
 }
 
 @media (max-width: 420px) {
@@ -2138,6 +2188,7 @@ footer {
         grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
         gap: 10px;
     }
+
 
     #chapter-ticks-container {
         display: none;

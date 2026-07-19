@@ -722,6 +722,55 @@ function buildStatDeltaHtml(value, average, formatFn, higherLabel, lowerLabel, h
 }
 
 /*
+ Single source of truth for the four comparable per-book metrics (Time
+ Spent, Pages per Hour, Completion Duration, Pages per Day) - value getter,
+ formatter, and higher-is-better direction all live here once, so anything
+ that needs "all four metrics" (buildFourMetricDeltas below, and the
+ Reading Speed Over Lifetime average footer in renderReadingSpeedProgression)
+ loops over this instead of re-listing the four metrics by hand. Adding a
+ fifth comparable metric later is one more entry pushed onto this array -
+ nothing that reads it needs to change.
+*/
+const FOUR_METRIC_DEFINITIONS = [
+    {
+        key: "timeSpent",
+        label: "Time Spent",
+        averageKey: "timeSpentMins",
+        cutoffKey: "timeSpentMins",
+        getValue: (m) => (m.mins > 0 ? m.mins : null),
+        format: formatMinutes,
+        higherIsBetter: false,
+    },
+    {
+        key: "pagesPerHour",
+        label: "Pages per Hour",
+        averageKey: "pagesPerHour",
+        cutoffKey: "pagesPerHour",
+        getValue: (m) => m.pagesPerHour,
+        format: (v) => `${v.toFixed(1)} p/h`,
+        higherIsBetter: true,
+    },
+    {
+        key: "completionDuration",
+        label: "Completion Duration",
+        averageKey: "completionDurationMs",
+        cutoffKey: "completionDurationMs",
+        getValue: (m) => m.completionDurationMs,
+        format: formatCompletionDuration,
+        higherIsBetter: false,
+    },
+    {
+        key: "pagesPerDay",
+        label: "Pages per Day",
+        averageKey: "pagesPerDay",
+        cutoffKey: "pagesPerDay",
+        getValue: (m) => m.pagesPerDay,
+        format: (v) => `${v.toFixed(1)} pages/day`,
+        higherIsBetter: true,
+    },
+];
+
+/*
  Computes the same four "delta from average" HTML snippets (Time Spent,
  Pages per Hour, Completion Duration, Pages per Day) for any object shaped
  like a perBookMetrics entry - i.e. anything with .mins, .pagesPerHour,
@@ -730,26 +779,20 @@ function buildStatDeltaHtml(value, average, formatFn, higherLabel, lowerLabel, h
  can show the exact same four comparisons without re-deriving or
  duplicating any of this logic - both call sites just pass in an object
  with those four fields and the shared statAverages.
+
+ Now just a thin loop over FOUR_METRIC_DEFINITIONS rather than four
+ hand-written calls, so this and the definitions list can never drift out
+ of sync with each other.
 */
 function buildFourMetricDeltas(m, statAverages) {
-    return {
-        timeSpent: buildStatDeltaHtml(
-            m.mins > 0 ? m.mins : null, statAverages.timeSpentMins,
-            formatMinutes, "", "", false, statAverages.cutoffs.timeSpentMins,
-        ),
-        pagesPerHour: buildStatDeltaHtml(
-            m.pagesPerHour, statAverages.pagesPerHour,
-            (v) => `${v.toFixed(1)} p/h`, "", "", true, statAverages.cutoffs.pagesPerHour,
-        ),
-        completionDuration: buildStatDeltaHtml(
-            m.completionDurationMs, statAverages.completionDurationMs,
-            formatCompletionDuration, "", "", false, statAverages.cutoffs.completionDurationMs,
-        ),
-        pagesPerDay: buildStatDeltaHtml(
-            m.pagesPerDay, statAverages.pagesPerDay,
-            (v) => `${v.toFixed(1)} pages/day`, "", "", true, statAverages.cutoffs.pagesPerDay,
-        ),
-    };
+    const result = {};
+    for (const def of FOUR_METRIC_DEFINITIONS) {
+        result[def.key] = buildStatDeltaHtml(
+            def.getValue(m), statAverages[def.averageKey],
+            def.format, "", "", def.higherIsBetter, statAverages.cutoffs[def.cutoffKey],
+        );
+    }
+    return result;
 }
 
 /*
@@ -1491,19 +1534,19 @@ function renderReadingSpeedProgression(entries, statAverages) {
                         <div class="speed-progression-metrics-grid">
                             <div>
                                 <div class="speed-progression-metric-label">Time Spent</div>
-                                <div>${formatMinutes(entry.mins)}${deltas.timeSpent}</div>
+                                <div class="speed-progression-metric-value-row"><span>${formatMinutes(entry.mins)}</span>${deltas.timeSpent}</div>
                             </div>
                             <div>
                                 <div class="speed-progression-metric-label">Pages per Hour</div>
-                                <div>${entry.pagesPerHour.toFixed(1)} p/h${deltas.pagesPerHour}</div>
+                                <div class="speed-progression-metric-value-row"><span>${entry.pagesPerHour.toFixed(1)} p/h</span>${deltas.pagesPerHour}</div>
                             </div>
                             <div>
                                 <div class="speed-progression-metric-label">Completion Duration</div>
-                                <div>${formatCompletionDuration(entry.completionDurationMs)}${deltas.completionDuration}</div>
+                                <div class="speed-progression-metric-value-row"><span>${formatCompletionDuration(entry.completionDurationMs)}</span>${deltas.completionDuration}</div>
                             </div>
                             <div>
                                 <div class="speed-progression-metric-label">Pages per Day</div>
-                                <div>${entry.pagesPerDay !== null ? `${entry.pagesPerDay.toFixed(1)} p/day` : "—"}${deltas.pagesPerDay}</div>
+                                <div class="speed-progression-metric-value-row"><span>${entry.pagesPerDay !== null ? `${entry.pagesPerDay.toFixed(1)} p/day` : "—"}</span>${deltas.pagesPerDay}</div>
                             </div>
                         </div>
                     </div>
@@ -1519,13 +1562,42 @@ function renderReadingSpeedProgression(entries, statAverages) {
         `;
     });
 
-    const overallAverage = sorted.reduce((sum, e) => sum + e.pagesPerHour, 0) / sorted.length;
+    /*
+     "Average" footer - one line per comparable metric (Time Spent, Pages
+     per Hour, Completion Duration, Pages per Day), read straight off the
+     shared statAverages object (see computeStatAverages()) rather than
+     recomputed here. Looping over FOUR_METRIC_DEFINITIONS instead of
+     writing one line per metric by hand means this footer automatically
+     picks up any future metric added to that list without needing its own
+     edit - it stays a plain "average for whatever's comparable" list.
+
+     Each metric formats its own average with the same format() function
+     used to render individual books' values (e.g. formatMinutes for Time
+     Spent, formatCompletionDuration for Completion Duration), so the units
+     the footer shows are guaranteed to match the units used everywhere
+     else in this section. A metric with no qualifying books at all (mean()
+     returned null in computeStatAverages) is simply skipped rather than
+     shown as "—", since an average of zero books isn't a real average to
+     report.
+    */
+    const averageRows = FOUR_METRIC_DEFINITIONS
+        .map((def) => {
+            const average = statAverages[def.averageKey];
+            if (average === null || average === undefined) return "";
+            return `
+                <div class="speed-progression-average-row">
+                    <span class="speed-progression-average-label">${escapeHtml(def.label)}</span>
+                    <span class="speed-progression-average-value">${escapeHtml(def.format(average))}</span>
+                </div>
+            `;
+        })
+        .join("");
 
     container.innerHTML = `
         ${monthSections.join("")}
-        <div style="display:flex; justify-content:space-between; padding:8px 0 0; margin-top:8px; border-top:1px solid var(--border); font-weight:600;">
-            <span>Average</span>
-            <span>${overallAverage.toFixed(1)} p/h</span>
+        <div class="speed-progression-average-block">
+            <div class="speed-progression-average-heading">Average</div>
+            ${averageRows}
         </div>
     `;
 }
