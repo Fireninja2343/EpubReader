@@ -730,6 +730,15 @@ function buildStatDeltaHtml(value, average, formatFn, higherLabel, lowerLabel, h
  loops over this instead of re-listing the four metrics by hand. Adding a
  fifth comparable metric later is one more entry pushed onto this array -
  nothing that reads it needs to change.
+
+ format: wrapped as `(v) => formatMinutes(v)` / `(v) => formatCompletionDuration(v)`
+ rather than passed directly (`format: formatMinutes`) - this array literal
+ is evaluated once, immediately, when this script file loads, and
+ formatMinutes/formatCompletionDuration are only defined later in
+ 10-utils.js, which loads after this file. Referencing them directly here
+ would look them up at array-creation time (before they exist) and throw;
+ wrapping in an arrow function defers that lookup until the format
+ function is actually called, by which point every script has loaded.
 */
 const FOUR_METRIC_DEFINITIONS = [
     {
@@ -738,7 +747,7 @@ const FOUR_METRIC_DEFINITIONS = [
         averageKey: "timeSpentMins",
         cutoffKey: "timeSpentMins",
         getValue: (m) => (m.mins > 0 ? m.mins : null),
-        format: formatMinutes,
+        format: (v) => formatMinutes(v),
         higherIsBetter: false,
     },
     {
@@ -756,7 +765,7 @@ const FOUR_METRIC_DEFINITIONS = [
         averageKey: "completionDurationMs",
         cutoffKey: "completionDurationMs",
         getValue: (m) => m.completionDurationMs,
-        format: formatCompletionDuration,
+        format: (v) => formatCompletionDuration(v),
         higherIsBetter: false,
     },
     {
