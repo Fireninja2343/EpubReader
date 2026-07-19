@@ -176,7 +176,8 @@ select {
 #library-view {
     flex-direction: column;
     padding: 30px;
-    overflow-y: auto;
+    overflow-y: scroll;
+    position: absolute;
     -webkit-overflow-scrolling: touch;
 }
 
@@ -1189,7 +1190,10 @@ footer {
 .speed-progression-average-block {
     padding-top: 8px;
     margin-top: 8px;
+    justify-content: space-between;
     border-top: 1px solid var(--border);
+    display: flex;
+    flex-direction:row;
 }
 
 .speed-progression-average-heading {
@@ -1207,6 +1211,7 @@ footer {
 .speed-progression-average-label {
     color: var(--text-muted);
     font-weight: 500;
+    padding: 0 10px;
 }
 
 .dist-bar-chart {
