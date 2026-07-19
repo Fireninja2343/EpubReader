@@ -1168,6 +1168,7 @@ footer {
 .speed-progression-metric-value-row {
     flex-direction: row;
     align-items: baseline;
+    display: flex;
     flex-wrap: wrap;
     gap: 6px;
 }
