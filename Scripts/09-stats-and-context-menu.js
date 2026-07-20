@@ -812,16 +812,15 @@ function buildFourMetricDeltas(m, statAverages) {
 function buildStatsRowHtml(m, statAverages) {
     const pagesPerHourDisplay = m.pagesPerHour !== null ? `${m.pagesPerHour.toFixed(1)} p/h` : "—";
     const deltas = buildFourMetricDeltas(m, statAverages);
-
     return `
         <tr style="border-bottom: 1px solid var(--border);">
-            <td style="padding:12px;">${escapeHtml(m.book.title)}</td>
-            <td style="padding:12px; color:var(--accent);">${READING_STATUS_LABELS[m.status]}</td>
-            <td style="padding:12px;">${m.pagesRead} / ${m.totalPages || "—"} pages</td>
-            <td style="padding:12px;">${formatMinutes(m.mins)}${deltas.timeSpent}</td>
-            <td style="padding:12px;">${pagesPerHourDisplay}${deltas.pagesPerHour}</td>
-            <td style="padding:12px;">${formatCompletionDuration(m.completionDurationMs)}${deltas.completionDuration}</td>
-            <td style="padding:12px;">${m.pagesPerDay !== null ? `${m.pagesPerDay.toFixed(1)} p/day` : "—"}${deltas.pagesPerDay}</td>
+            <td /* style="padding:12px; */">${escapeHtml(m.book.title)}</td>
+            <td/* style="padding:12px; */ color:var(--accent);">${READING_STATUS_LABELS[m.status]}</td>
+            <td /* style="padding:12px; */">${m.pagesRead} / ${m.totalPages || "—"} pages</td>
+            <td /* style="padding:12px; */">${formatMinutes(m.mins)}${deltas.timeSpent}</td>
+            <td /* style="padding:12px; */">${pagesPerHourDisplay}${deltas.pagesPerHour}</td>
+            <td /* style="padding:12px; */">${formatCompletionDuration(m.completionDurationMs)}${deltas.completionDuration}</td>
+            <td /* style="padding:12px; */">${m.pagesPerDay !== null ? `${m.pagesPerDay.toFixed(1)} p/day` : "—"}${deltas.pagesPerDay}</td>
         </tr>
     `;
 }
