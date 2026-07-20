@@ -231,10 +231,11 @@
         -webkit-overflow-scrolling: touch;
         max-width: 100%;
         min-height: min-content;
-        font-size: 12px;
+        
     }
     .table-wrapper .data-table {
         min-width: 700px;
+        font-size: 12px;
     }
     .data-table td {
         padding: 8px;
