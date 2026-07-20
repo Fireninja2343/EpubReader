@@ -2,8 +2,10 @@
  =================================================================
  FIREBASE CLOUD SYNC MODULE
  IndexedDB remains the source of truth for offline use. This module
- mirrors book metadata and reading progress to Firestore, and stores the
- actual .epub binaries as chunked base64 text also inside Firestore
+ mirrors book metadata (including reading progress, reading sessions,
+ reading history, and sort order), groups, notes, note tags, and the
+ small set of Notes-page settings/preferences to Firestore, and stores
+ the actual .epub binaries as chunked base64 text also inside Firestore
  (avoiding the need for Firebase Storage or a billing plan).
 
  SYNC MODEL (deliberately NOT real-time):
@@ -148,6 +150,25 @@ function booksCollection() {
 function groupsCollection() {
   return fbDb.collection("users").doc(currentUser.uid).collection("groups");
 }
+// Notes and note-tags get their own collections, same "one doc per local
+// IndexedDB row, doc id = local numeric id as a string" pattern already
+// used for books/groups above.
+function notesCollection() {
+  return fbDb.collection("users").doc(currentUser.uid).collection("notes");
+}
+function noteTagsCollection() {
+  return fbDb.collection("users").doc(currentUser.uid).collection("noteTags");
+}
+/*
+ Settings/preferences (currently: the Notes page's collapsed-tag-sections
+ layout and the last-used tag selection - see Config.Db.*_STORAGE_KEY in
+ 00-config.js) don't need their own subcollection the way books/notes do;
+ there's only ever one of them per user, so they live as plain fields on
+ the user's root doc instead.
+*/
+function userDoc() {
+  return fbDb.collection("users").doc(currentUser.uid);
+}
 
 // -----------------------------------------------------------------
 // PUSH: local change -> cloud
@@ -182,6 +203,11 @@ async function pushBookMetadataToCloud(book) {
         // Real per-session log - see appendReadingSession() in 02-db.js and
         // the session lifecycle engine in 09-stats-and-context-menu.js.
         readingSessions: book.readingSessions ?? [],
+        // Raw per-session activity log powering the reading-activity
+        // calendar heatmap (see 13-reading-history.js) - previously never
+        // left this device, so the heatmap/streaks would silently reset on
+        // every other device even though the data existed on this one.
+        readingHistory: book.readingHistory ?? [],
       },
       { merge: true },
     );
@@ -246,6 +272,84 @@ async function pushGroupToCloud(group) {
   });
 }
 
+/*
+ -----------------------------------------------------------------
+ NOTES / NOTE-TAGS / SETTINGS SYNC
+ Same "IndexedDB stays the source of truth, Firestore is a mirror" model
+ as books/groups above. Notes and tags don't carry a lastModified field in
+ their local schema (see 12-notes.js), so one is stamped on here at push
+ time and stored in Firestore only - it's used purely to decide which side
+ wins during pullInitialSyncFromCloud(), never written back into the local
+ IndexedDB record, so it can't collide with anything the notes UI expects.
+ -----------------------------------------------------------------
+*/
+async function pushNoteToCloud(note) {
+  if (!currentUser || !note || note.id == null) return;
+  logCloudWrite(`note #${note.id}`);
+  await notesCollection()
+    .doc(String(note.id))
+    .set(
+      {
+        selectedText: note.selectedText ?? "",
+        comment: note.comment ?? "",
+        tagIds: note.tagIds ?? [],
+        bookId: note.bookId ?? null,
+        bookTitle: note.bookTitle ?? null,
+        dateCreated: note.dateCreated ?? Date.now(),
+        lastModified: Date.now(),
+      },
+      { merge: true },
+    );
+}
+
+async function deleteNoteFromCloud(noteId) {
+  if (!currentUser || noteId == null) return;
+  await notesCollection().doc(String(noteId)).delete().catch(() => {});
+}
+
+async function pushNoteTagToCloud(tag) {
+  if (!currentUser || !tag || tag.id == null) return;
+  logCloudWrite(`note tag #${tag.id}`);
+  await noteTagsCollection()
+    .doc(String(tag.id))
+    .set(
+      {
+        name: tag.name ?? null,
+        color: tag.color ?? null,
+        lastModified: Date.now(),
+      },
+      { merge: true },
+    );
+}
+
+async function deleteNoteTagFromCloud(tagId) {
+  if (!currentUser || tagId == null) return;
+  await noteTagsCollection().doc(String(tagId)).delete().catch(() => {});
+}
+
+/*
+ Settings/preferences push is throttled the same way group edits are -
+ these two localStorage-backed values (see 12-notes.js) can change on
+ nearly every click while managing tags, so this keeps them to at most one
+ Firestore write per interval rather than one per click.
+*/
+function pushNoteSettingsToCloud() {
+  if (!currentUser) return;
+  throttledCloudPush("settings", async () => {
+    logCloudWrite("settings");
+    await userDoc().set(
+      {
+        settings: {
+          collapsedNoteTagKeys: Array.from(collapsedNoteTagKeys || []),
+          lastUsedNoteTagIds: loadLastUsedNoteTagIds(),
+          lastModified: Date.now(),
+        },
+      },
+      { merge: true },
+    );
+  });
+}
+
 async function deleteBookFromCloud(bookId) {
   if (!currentUser) return;
   const chunkCollection = booksCollection()
@@ -278,9 +382,12 @@ async function pullInitialSyncFromCloud() {
   console.log("[FirebaseSync] running pullInitialSyncFromCloud()");
 
   try {
-    const [remoteBooksSnap, remoteGroupsSnap] = await Promise.all([
+    const [remoteBooksSnap, remoteGroupsSnap, remoteNotesSnap, remoteNoteTagsSnap, remoteUserSnap] = await Promise.all([
       booksCollection().get(),
       groupsCollection().get(),
+      notesCollection().get(),
+      noteTagsCollection().get(),
+      userDoc().get(),
     ]);
 
     const remoteBookIds = new Set(
@@ -325,6 +432,95 @@ async function pullInitialSyncFromCloud() {
         await pushBookFileToCloud(book);
       }
     }
+
+    /*
+     Notes/tags use the same "download what's only remote, upload what's
+     only local, newer lastModified wins on both sides" reconciliation as
+     books above. loadedNotesMemory/loadedNoteTagsMemory (12-notes.js) may
+     not have been populated yet if this runs before the first
+     fetchNotesLibrary() completes, so an empty array is a safe fallback
+     rather than throwing.
+    */
+    const localNotes = typeof loadedNotesMemory !== "undefined" ? loadedNotesMemory : [];
+    const localNoteTags = typeof loadedNoteTagsMemory !== "undefined" ? loadedNoteTagsMemory : [];
+    const remoteNoteIds = new Set(remoteNotesSnap.docs.map((d) => Number(d.id)));
+    const remoteNoteTagIds = new Set(remoteNoteTagsSnap.docs.map((d) => Number(d.id)));
+
+    await new Promise((resolve) => {
+      const tx = db.transaction([STORE_NOTES, STORE_NOTE_GROUPS], "readwrite");
+      const notesStore = tx.objectStore(STORE_NOTES);
+      const tagsStore = tx.objectStore(STORE_NOTE_GROUPS);
+
+      remoteNoteTagsSnap.forEach((docSnap) => {
+        const tagId = Number(docSnap.id);
+        const localTag = localNoteTags.find((t) => t.id === tagId);
+        const remote = docSnap.data();
+        if (!localTag || (remote.lastModified || 0) >= (localTag.lastModified || 0)) {
+          tagsStore.put({ id: tagId, name: remote.name, color: remote.color });
+        }
+      });
+
+      remoteNotesSnap.forEach((docSnap) => {
+        const noteId = Number(docSnap.id);
+        const localNote = localNotes.find((n) => n.id === noteId);
+        const remote = docSnap.data();
+        if (!localNote || (remote.lastModified || 0) >= (localNote.lastModified || 0)) {
+          notesStore.put({
+            id: noteId,
+            selectedText: remote.selectedText ?? "",
+            comment: remote.comment ?? "",
+            tagIds: remote.tagIds ?? [],
+            bookId: remote.bookId ?? null,
+            bookTitle: remote.bookTitle ?? null,
+            dateCreated: remote.dateCreated ?? Date.now(),
+          });
+        }
+      });
+
+      tx.oncomplete = resolve;
+    });
+
+    for (const tag of localNoteTags) {
+      if (!remoteNoteTagIds.has(tag.id)) await pushNoteTagToCloud(tag);
+    }
+    for (const note of localNotes) {
+      if (!remoteNoteIds.has(note.id)) await pushNoteToCloud(note);
+    }
+
+    /*
+     Settings: last-write-wins on the whole bundle (it's just two small
+     UI-preference values, not worth field-by-field merging). Missing
+     remote settings (first sync ever, or a pre-existing cloud account from
+     before this feature existed) simply leaves the local values as they
+     are.
+    */
+    const remoteUserData = remoteUserSnap.exists ? remoteUserSnap.data() : null;
+    const remoteSettings = remoteUserData && remoteUserData.settings;
+    if (remoteSettings) {
+      const localSettingsStamp = Math.max(
+        Number(localStorage.getItem(`${Config.Db.COLLAPSED_NOTE_TAG_KEYS_STORAGE_KEY}_ts`)) || 0,
+        Number(localStorage.getItem(`${Config.Db.LAST_NOTE_TAGS_STORAGE_KEY}_ts`)) || 0,
+      );
+      if ((remoteSettings.lastModified || 0) >= localSettingsStamp) {
+        if (Array.isArray(remoteSettings.collapsedNoteTagKeys)) {
+          localStorage.setItem(
+            Config.Db.COLLAPSED_NOTE_TAG_KEYS_STORAGE_KEY,
+            JSON.stringify(remoteSettings.collapsedNoteTagKeys),
+          );
+          if (typeof collapsedNoteTagKeys !== "undefined") {
+            collapsedNoteTagKeys = new Set(remoteSettings.collapsedNoteTagKeys);
+          }
+        }
+        if (Array.isArray(remoteSettings.lastUsedNoteTagIds)) {
+          localStorage.setItem(
+            Config.Db.LAST_NOTE_TAGS_STORAGE_KEY,
+            JSON.stringify(remoteSettings.lastUsedNoteTagIds),
+          );
+        }
+      } else {
+        pushNoteSettingsToCloud();
+      }
+    }
   } catch (err) {
     console.error("Firebase sync error:", err);
     let hint = "";
@@ -340,6 +536,7 @@ async function pullInitialSyncFromCloud() {
   } finally {
     initialSyncInProgress = false;
     fetchLocalLibrary();
+    if (typeof fetchNotesLibrary === "function") fetchNotesLibrary();
   }
 }
 
@@ -379,6 +576,7 @@ function applyRemoteBookUpdate(bookId, remote) {
          has locally instead of wiping it out.
         */
         rec.readingSessions = remote.readingSessions ?? rec.readingSessions;
+        rec.readingHistory = remote.readingHistory ?? rec.readingHistory;
         store.put(rec);
       }
     };
@@ -429,6 +627,7 @@ async function downloadBookFromCloud(bookId, remoteMeta) {
         completedDate: remoteMeta.completedDate ?? null,
         totalSessions: remoteMeta.totalSessions ?? 0,
         readingSessions: remoteMeta.readingSessions ?? [],
+        readingHistory: remoteMeta.readingHistory ?? [],
       });
       tx.oncomplete = resolve;
     });

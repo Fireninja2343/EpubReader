@@ -271,6 +271,7 @@ const READER_BUTTON_ELEMENT_MAP = {
     viewMode: "library-view-mode",
     openSelected: "btn-open-book",
     lastRead: "btn-last-read",
+    hardReload: "btn-hard-reload",
 };
 
 function handleReaderButtonToggle(key, isChecked) {

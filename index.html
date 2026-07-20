@@ -340,7 +340,10 @@
                 <div class="flex-gap8">
                     <input type="checkbox" id="toggle-btn-last-read" checked onchange="handleReaderButtonToggle('lastRead', this.checked)">
                     <label for="toggle-btn-last-read">Show Last Read</label>
-
+                </div>
+                <div class="flex-gap8">
+                    <input type="checkbox" id="toggle-btn-hard-reload" checked onchange="handleReaderButtonToggle('hardReload', this.checked)">
+                    <label for="toggle-btn-hard-reload">Show Hard Reload</label>
                 </div>
             </div>
             <div class="sidebar-heading">Reader Configurations</div>
@@ -391,6 +394,9 @@
     <div id="sign-in">
             <button id="btn-sync-signin" onclick="signInWithGoogle()">🔄 Sign in to Sync</button>
             <span id="sync-status">☁️ Not signed in</span>
+            <button id="btn-hard-reload" onclick="hardReloadApp()"
+            title="Clears cached app files and reloads - use this if the app is acting stale or a Service Worker/PWA update isn't showing up">
+            🧹 Hard Reload</button>
     </div>
 
     <footer>

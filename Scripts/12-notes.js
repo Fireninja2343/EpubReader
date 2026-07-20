@@ -16,8 +16,10 @@
  note.bookTitle plus that book's current group color, so it can't drift out
  of sync and never needs a "None" placeholder when there isn't one.
 
- Like the rest of the app, IndexedDB is the source of truth here; this
- module doesn't push notes to Firebase, so they stay local-only for now.
+ Like the rest of the app, IndexedDB is the source of truth here; notes and
+ tags are additionally mirrored to Firebase the same way books/groups are
+ (see the pushNoteToCloud/pushNoteTagToCloud calls throughout this file and
+ the notes/tags reconciliation in pullInitialSyncFromCloud(), 11-firebase-sync.js).
  =================================================================
 */
 
@@ -55,6 +57,11 @@ function saveCollapsedNoteTagKeys() {
     COLLAPSED_NOTE_TAG_KEYS_STORAGE_KEY,
     JSON.stringify(Array.from(collapsedNoteTagKeys)),
   );
+  // Timestamp used only by 11-firebase-sync.js to decide whether this
+  // device's or the cloud's settings bundle is newer - never read by
+  // anything on this page itself.
+  localStorage.setItem(`${COLLAPSED_NOTE_TAG_KEYS_STORAGE_KEY}_ts`, String(Date.now()));
+  if (typeof pushSettingsToCloud === "function") pushSettingsToCloud();
 }
 
 let collapsedNoteTagKeys = loadCollapsedNoteTagKeys();
@@ -320,11 +327,14 @@ function submitNoteEditorForm() {
   };
 
   const transaction = db.transaction([STORE_NOTES], "readwrite");
-  transaction.objectStore(STORE_NOTES).add(entry);
+  transaction.objectStore(STORE_NOTES).add(entry).onsuccess = (e) => {
+    entry.id = e.target.result;
+  };
   transaction.oncomplete = () => {
     saveLastUsedNoteTagIds(tagIds);
     closeNoteEditorModal();
     fetchNotesLibrary();
+    if (typeof pushNoteToCloud === "function") pushNoteToCloud(entry);
   };
 }
 
@@ -341,6 +351,8 @@ function loadLastUsedNoteTagIds() {
 
 function saveLastUsedNoteTagIds(tagIds) {
   localStorage.setItem(LAST_NOTE_TAGS_STORAGE_KEY, JSON.stringify(tagIds || []));
+  localStorage.setItem(`${LAST_NOTE_TAGS_STORAGE_KEY}_ts`, String(Date.now()));
+  if (typeof pushSettingsToCloud === "function") pushSettingsToCloud();
 }
 
 // -----------------------------------------------------------------
@@ -575,7 +587,10 @@ function deleteNote(noteId) {
   if (!confirm("Delete this note? This cannot be undone.")) return;
   const transaction = db.transaction([STORE_NOTES], "readwrite");
   transaction.objectStore(STORE_NOTES).delete(noteId);
-  transaction.oncomplete = () => fetchNotesLibrary();
+  transaction.oncomplete = () => {
+    fetchNotesLibrary();
+    if (typeof deleteNoteFromCloud === "function") deleteNoteFromCloud(noteId);
+  };
 }
 
 // -----------------------------------------------------------------
@@ -630,14 +645,19 @@ function triggerNoteContextAction(actionKey) {
 function updateNoteFields(noteId, changes) {
   const transaction = db.transaction([STORE_NOTES], "readwrite");
   const store = transaction.objectStore(STORE_NOTES);
+  let updatedRecord = null;
   store.get(noteId).onsuccess = (e) => {
     const record = e.target.result;
     if (record) {
       Object.assign(record, changes);
       store.put(record);
+      updatedRecord = record;
     }
   };
-  transaction.oncomplete = () => fetchNotesLibrary();
+  transaction.oncomplete = () => {
+    fetchNotesLibrary();
+    if (updatedRecord && typeof pushNoteToCloud === "function") pushNoteToCloud(updatedRecord);
+  };
 }
 
 // -----------------------------------------------------------------
@@ -727,14 +747,19 @@ function renderNoteTagManageList() {
 function updateNoteTag(tagId, changes) {
   const transaction = db.transaction([STORE_NOTE_GROUPS], "readwrite");
   const store = transaction.objectStore(STORE_NOTE_GROUPS);
+  let updatedRecord = null;
   store.get(tagId).onsuccess = (e) => {
     const record = e.target.result;
     if (record) {
       Object.assign(record, changes);
       store.put(record);
+      updatedRecord = record;
     }
   };
-  transaction.oncomplete = () => fetchNotesLibrary();
+  transaction.oncomplete = () => {
+    fetchNotesLibrary();
+    if (updatedRecord && typeof pushNoteTagToCloud === "function") pushNoteTagToCloud(updatedRecord);
+  };
 }
 
 function createNoteTag() {
@@ -749,9 +774,15 @@ function createNoteTag() {
     .toString(16)
     .padStart(6, "0")}`;
 
+  const newTag = { name: "New Tag", color: randomColor };
   const transaction = db.transaction([STORE_NOTE_GROUPS], "readwrite");
-  transaction.objectStore(STORE_NOTE_GROUPS).add({ name: "New Tag", color: randomColor });
-  transaction.oncomplete = () => fetchNotesLibrary();
+  transaction.objectStore(STORE_NOTE_GROUPS).add(newTag).onsuccess = (e) => {
+    newTag.id = e.target.result;
+  };
+  transaction.oncomplete = () => {
+    fetchNotesLibrary();
+    if (typeof pushNoteTagToCloud === "function") pushNoteTagToCloud(newTag);
+  };
 }
 
 function deleteNoteTag(tagId) {
@@ -763,14 +794,22 @@ function deleteNoteTag(tagId) {
 
   tagsStore.delete(tagId);
 
+  const notesToRepush = [];
   notesStore.getAll().onsuccess = (e) => {
     e.target.result.forEach((note) => {
       if (note.tagIds && note.tagIds.includes(tagId)) {
         note.tagIds = note.tagIds.filter((id) => id !== tagId);
         notesStore.put(note);
+        notesToRepush.push(note);
       }
     });
   };
 
-  transaction.oncomplete = () => fetchNotesLibrary();
+  transaction.oncomplete = () => {
+    fetchNotesLibrary();
+    if (typeof deleteNoteTagFromCloud === "function") deleteNoteTagFromCloud(tagId);
+    if (typeof pushNoteToCloud === "function") {
+      notesToRepush.forEach((note) => pushNoteToCloud(note));
+    }
+  };
 }
