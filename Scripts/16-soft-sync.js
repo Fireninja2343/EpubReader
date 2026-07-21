@@ -44,7 +44,11 @@
    key            - stable id, e.g. "books"
    label          - display name, e.g. "Books"
    icon           - emoji shown in the group header
-   fetchLocal()   -> array of local records (each must have an `id`)
+   fetchLocal()   -> Promise<array of local records (each must have an `id`)>.
+                    Reads IndexedDB directly (see getAllFromLocalStore()
+                    below) rather than an in-memory cache, since those
+                    caches aren't guaranteed populated yet when this runs -
+                    see the comment on the books entry's fetchLocal below.
    fetchRemote()  -> Promise<array of remote records (each must have an `id`)>
    describe(rec)  -> short human label for one record, e.g. book title
    fieldsToCompare(rec) -> plain object of just the fields that matter for
@@ -63,7 +67,14 @@ const SYNC_TYPE_REGISTRY = [
     key: "books",
     label: "Books",
     icon: "📚",
-    fetchLocal: () => loadedBooksMemory.slice(),
+    // Reads IndexedDB directly rather than trusting loadedBooksMemory: that
+    // in-memory cache is only ever as fresh as the last fetchLocalLibrary()
+    // call, and 11-firebase-sync.js's own pullInitialSyncFromCloud() has a
+    // documented race where it can run before that cache is populated (see
+    // its comment above the equivalent notes/tags read). IndexedDB itself
+    // is the actual source of truth per this app's architecture, so
+    // comparisons here should never be fooled by a stale/empty cache.
+    fetchLocal: () => getAllFromLocalStore(STORE_BOOKS),
     fetchRemote: async () => {
       const snap = await booksCollection().get();
       return snap.docs.map((d) => ({ id: Number(d.id), ...d.data() }));
@@ -136,7 +147,7 @@ const SYNC_TYPE_REGISTRY = [
     key: "groups",
     label: "Collections / Groups",
     icon: "🗂️",
-    fetchLocal: () => loadedGroupsMemory.slice(),
+    fetchLocal: () => getAllFromLocalStore(STORE_GROUPS),
     fetchRemote: async () => {
       const snap = await groupsCollection().get();
       return snap.docs.map((d) => ({ id: Number(d.id), ...d.data() }));
@@ -172,7 +183,7 @@ const SYNC_TYPE_REGISTRY = [
     key: "notes",
     label: "Notes",
     icon: "📝",
-    fetchLocal: () => (typeof loadedNotesMemory !== "undefined" ? loadedNotesMemory.slice() : []),
+    fetchLocal: () => getAllFromLocalStore(STORE_NOTES),
     fetchRemote: async () => {
       const snap = await notesCollection().get();
       return snap.docs.map((d) => ({ id: Number(d.id), ...d.data() }));
@@ -211,7 +222,7 @@ const SYNC_TYPE_REGISTRY = [
     key: "noteTags",
     label: "Note Tags",
     icon: "🏷️",
-    fetchLocal: () => (typeof loadedNoteTagsMemory !== "undefined" ? loadedNoteTagsMemory.slice() : []),
+    fetchLocal: () => getAllFromLocalStore(STORE_NOTE_GROUPS),
     fetchRemote: async () => {
       const snap = await noteTagsCollection().get();
       return snap.docs.map((d) => ({ id: Number(d.id), ...d.data() }));
@@ -322,6 +333,9 @@ const SYNC_TYPE_REGISTRY = [
 // SMALL LOCAL-DB HELPERS (generic put/delete, reused across registry
 // entries above instead of each one opening its own transaction)
 // -----------------------------------------------------------------
+// getAllFromLocalStore() itself lives in 15-danger-zone.js (loaded before
+// this file) and is shared as-is - see its definition there for why it
+// reads IndexedDB directly instead of the in-memory caches.
 function putLocalRecord(storeName, record) {
   return new Promise((resolve, reject) => {
     const tx = db.transaction([storeName], "readwrite");
@@ -392,7 +406,7 @@ async function buildSyncPlan(direction) {
   const operations = [];
 
   for (const entry of SYNC_TYPE_REGISTRY) {
-    const localRecords = entry.fetchLocal();
+    const localRecords = await entry.fetchLocal();
     const remoteRecords = await entry.fetchRemote();
 
     const localById = new Map(localRecords.map((r) => [String(r.id), r]));

@@ -34,6 +34,27 @@
  =================================================================
 */
 
+/*
+ Reads every record in a store straight from IndexedDB, rather than
+ whatever in-memory cache (loadedBooksMemory, loadedNotesMemory, etc.)
+ happens to mirror it at this moment. This matters because those caches
+ are only ever as fresh as the last explicit fetch, and this app has a
+ documented race (see pullInitialSyncFromCloud() in 11-firebase-sync.js)
+ where cloud sync can run before a given cache has been populated for the
+ first time in a session. Both Hard Push (below) and Soft Pull/Push
+ (16-soft-sync.js) share this one implementation rather than each
+ duplicating it, so there's a single place that always reflects the real
+ on-disk state instead of a snapshot that might be behind it.
+*/
+function getAllFromLocalStore(storeName) {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction([storeName], "readonly");
+    const req = tx.objectStore(storeName).getAll();
+    req.onsuccess = () => resolve(req.result || []);
+    req.onerror = () => reject(req.error);
+  });
+}
+
 // -----------------------------------------------------------------
 // REUSABLE LOCAL-DATA-WIPE PRIMITIVE
 // Used by both Clear Local Data and (as the first step of) Hard Pull, so
@@ -396,18 +417,32 @@ async function hardPushToCloud() {
     noteTagsCollection().get(),
   ]);
 
-  const localBookIds = new Set(loadedBooksMemory.map((b) => b.id));
-  const localGroupIds = new Set(loadedGroupsMemory.map((g) => g.id));
-  const localNotes = typeof loadedNotesMemory !== "undefined" ? loadedNotesMemory : [];
-  const localNoteTags = typeof loadedNoteTagsMemory !== "undefined" ? loadedNoteTagsMemory : [];
+  /*
+   Read straight from IndexedDB rather than loadedBooksMemory/
+   loadedGroupsMemory/loadedNotesMemory/loadedNoteTagsMemory. Those
+   in-memory caches are only as fresh as the last explicit fetch, and
+   pullInitialSyncFromCloud() (11-firebase-sync.js) documents a real race
+   where cloud sync can run before a given cache is populated for the
+   first time in a session. If Hard Push trusted a stale/empty cache
+   here, it wouldn't just skip pushing real local data - the cleanup pass
+   below would see an empty local id set and DELETE every matching record
+   from the cloud, since nothing local would appear to reference it.
+  */
+  const localBooks = await getAllFromLocalStore(STORE_BOOKS);
+  const localGroups = await getAllFromLocalStore(STORE_GROUPS);
+  const localNotes = await getAllFromLocalStore(STORE_NOTES);
+  const localNoteTags = await getAllFromLocalStore(STORE_NOTE_GROUPS);
+
+  const localBookIds = new Set(localBooks.map((b) => b.id));
+  const localGroupIds = new Set(localGroups.map((g) => g.id));
   const localNoteIds = new Set(localNotes.map((n) => n.id));
   const localNoteTagIds = new Set(localNoteTags.map((t) => t.id));
 
   // --- Push every local record unconditionally ---
-  for (const group of loadedGroupsMemory) {
+  for (const group of localGroups) {
     await pushGroupToCloudForced(group);
   }
-  for (const book of loadedBooksMemory) {
+  for (const book of localBooks) {
     await pushBookMetadataToCloud(book);
     await pushBookFileToCloud(book);
   }
