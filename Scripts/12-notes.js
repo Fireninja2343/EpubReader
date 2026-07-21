@@ -61,7 +61,7 @@ function saveCollapsedNoteTagKeys() {
   // device's or the cloud's settings bundle is newer - never read by
   // anything on this page itself.
   localStorage.setItem(`${COLLAPSED_NOTE_TAG_KEYS_STORAGE_KEY}_ts`, String(Date.now()));
-  if (typeof pushSettingsToCloud === "function") pushSettingsToCloud();
+  if (typeof pushNoteSettingsToCloud === "function") pushNoteSettingsToCloud();
 }
 
 let collapsedNoteTagKeys = loadCollapsedNoteTagKeys();
@@ -352,7 +352,7 @@ function loadLastUsedNoteTagIds() {
 function saveLastUsedNoteTagIds(tagIds) {
   localStorage.setItem(LAST_NOTE_TAGS_STORAGE_KEY, JSON.stringify(tagIds || []));
   localStorage.setItem(`${LAST_NOTE_TAGS_STORAGE_KEY}_ts`, String(Date.now()));
-  if (typeof pushSettingsToCloud === "function") pushSettingsToCloud();
+  if (typeof pushNoteSettingsToCloud === "function") pushNoteSettingsToCloud();
 }
 
 // -----------------------------------------------------------------

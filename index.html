@@ -13,6 +13,7 @@
     <link rel="stylesheet" href="Styles/03-stats.css" />
     <link rel="stylesheet" href="Styles/04-notes.css" />
     <link rel="stylesheet" href="Styles/05-responsive.css" />
+    <link rel="stylesheet" href="Styles/06-danger-zone.css" />
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 
     <!-- Firebase (compat build, matches the plain-script style of the rest of the app) -->
@@ -36,6 +37,10 @@
     <script src="Scripts/12-notes.js" defer></script>
     <script src="Scripts/13-reading-history.js" defer></script>
     <script src="Scripts/14-timeline.js" defer></script>
+    <!-- Depends on functions from 02-db.js, 07-reader-controls.js (hardReloadApp),
+         10-utils.js (escapeHtml), 11-firebase-sync.js, and 12-notes.js, so it
+         loads last. -->
+    <script src="Scripts/15-danger-zone.js" defer></script>
 </head>
 
 <body>
@@ -345,7 +350,42 @@
                     <input type="checkbox" id="toggle-btn-hard-reload" checked onchange="handleReaderButtonToggle('hardReload', this.checked)">
                     <label for="toggle-btn-hard-reload">Show Hard Reload</label>
                 </div>
+                <div class="flex-gap8">
+                    <input type="checkbox" id="toggle-btn-clear-local-data" checked onchange="handleReaderButtonToggle('clearLocalData', this.checked)">
+                    <label for="toggle-btn-clear-local-data">Show Clear Local Data</label>
+                </div>
+                <div class="flex-gap8">
+                    <input type="checkbox" id="toggle-btn-hard-pull" checked onchange="handleReaderButtonToggle('hardPull', this.checked)">
+                    <label for="toggle-btn-hard-pull">Show Hard Pull</label>
+                </div>
+                <div class="flex-gap8">
+                    <input type="checkbox" id="toggle-btn-hard-push" checked onchange="handleReaderButtonToggle('hardPush', this.checked)">
+                    <label for="toggle-btn-hard-push">Show Hard Push</label>
+                </div>
             </div>
+
+            <div class="sidebar-heading danger-zone-heading">⚠️ Danger Zone / Sync Recovery</div>
+            <div class="control-item control-item-top">
+                <span class="hint-text">
+                    These are recovery tools for when automatic sync fails or local/cloud data
+                    disagree (common on mobile). Each requires typing a confirmation phrase.
+                </span>
+                <div class="danger-zone-buttons">
+                    <button id="btn-clear-local-data" class="btn-danger-clear" onclick="promptClearLocalData()"
+                        title="Deletes all local books, groups, notes, tags, and settings on this device. Cloud data is untouched.">
+                        🗑️ Clear Local Data
+                    </button>
+                    <button id="btn-hard-pull" class="btn-danger-pull" onclick="promptHardPull()"
+                        title="Discards local data and rebuilds it from the cloud.">
+                        ⬇️ Hard Pull (Cloud → Local)
+                    </button>
+                    <button id="btn-hard-push" class="btn-danger-push" onclick="promptHardPush()"
+                        title="Overwrites the cloud with a full copy of local data.">
+                        ⬆️ Hard Push (Local → Cloud)
+                    </button>
+                </div>
+            </div>
+
             <div class="sidebar-heading">Reader Configurations</div>
             <div class="control-item control-item-top">
                 <div class="flex-gap8">
@@ -517,6 +557,31 @@
             <button onclick="createNoteTag()" class="btn-ghost note-tag-add-btn">➕ New Tag</button>
             <div class="modal-actions">
                 <button onclick="closeNoteTagManageModal()" class="btn-accent btn-compact">Done</button>
+            </div>
+        </div>
+    </dialog>
+
+    <!--
+     Reusable typed-confirmation modal backing every Danger Zone action
+     (Clear Local Data, Hard Pull, Hard Push - see 15-danger-zone.js). The
+     data-theme attribute (set in JS via openDangerConfirmModal()) drives
+     which accent color the dialog takes on, so Pull and Push are visually
+     distinct even though they share this same markup.
+    -->
+    <dialog id="danger-confirm-modal" class="custom-modal danger-confirm-modal" data-busy="false">
+        <div class="modal-content">
+            <h3 id="danger-confirm-title">Confirm Action</h3>
+            <hr class="hr-divider-spaced" />
+            <div id="danger-confirm-body" class="danger-confirm-body"></div>
+            <div class="control-item">
+                <label id="danger-confirm-phrase-hint" class="danger-confirm-phrase-hint"></label>
+                <input type="text" id="danger-confirm-input" class="full-width-input" autocomplete="off"
+                    spellcheck="false" oninput="handleDangerConfirmInput()" />
+            </div>
+            <div id="danger-confirm-status" class="danger-confirm-status"></div>
+            <div class="modal-actions">
+                <button id="danger-confirm-cancel-btn" class="btn-ghost" onclick="closeDangerConfirmModal()">Cancel</button>
+                <button id="danger-confirm-btn" class="btn-danger-confirm" disabled onclick="submitDangerConfirmModal()">Confirm</button>
             </div>
         </div>
     </dialog>

@@ -1,0 +1,166 @@
+/* =================================================================
+   DANGER ZONE / SYNC RECOVERY
+   Styling for the Settings sidebar's "Danger Zone / Sync Recovery"
+   section (Clear Local Data, Hard Pull, Hard Push) and the shared typed-
+   confirmation modal that backs all three - see 15-danger-zone.js.
+
+   Deliberately visually distinct from the rest of the settings sidebar
+   (red-tinted heading, colored button borders) so this section reads as
+   "be careful here" at a glance, and the three buttons are each a
+   different accent so Pull and Push in particular can't be mixed up:
+     - Clear Local Data -> neutral red   (local-only, destructive)
+     - Hard Pull         -> blue         ("incoming" from the cloud)
+     - Hard Push         -> orange       ("outgoing" to the cloud)
+   ================================================================= */
+
+:root {
+    --danger-clear-color: #e05d5d;
+    --danger-pull-color: #4d9fe0;
+    --danger-push-color: #e0954d;
+}
+
+.danger-zone-heading {
+    color: var(--danger-clear-color);
+    border-top: 1px solid var(--danger-clear-color);
+    opacity: 0.9;
+}
+
+.danger-zone-buttons {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 10px;
+}
+
+.danger-zone-buttons button {
+    padding: 10px 12px;
+    font-weight: 600;
+    border-width: 2px;
+    text-align: left;
+}
+
+.btn-danger-clear {
+    border-color: var(--danger-clear-color);
+    color: var(--danger-clear-color);
+    background-color: rgba(224, 93, 93, 0.08);
+}
+.btn-danger-clear:hover {
+    background-color: rgba(224, 93, 93, 0.18);
+    border-color: var(--danger-clear-color);
+}
+
+.btn-danger-pull {
+    border-color: var(--danger-pull-color);
+    color: var(--danger-pull-color);
+    background-color: rgba(77, 159, 224, 0.08);
+}
+.btn-danger-pull:hover {
+    background-color: rgba(77, 159, 224, 0.18);
+    border-color: var(--danger-pull-color);
+}
+
+.btn-danger-push {
+    border-color: var(--danger-push-color);
+    color: var(--danger-push-color);
+    background-color: rgba(224, 149, 77, 0.08);
+}
+.btn-danger-push:hover {
+    background-color: rgba(224, 149, 77, 0.18);
+    border-color: var(--danger-push-color);
+}
+
+.danger-zone-buttons button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+}
+
+/* --- Confirmation modal --- */
+.danger-confirm-modal {
+    width: 420px;
+    border-width: 2px;
+}
+
+/* Theme accents, driven by data-theme set in openDangerConfirmModal() */
+.danger-confirm-modal[data-theme="clear"] {
+    border-color: var(--danger-clear-color);
+}
+.danger-confirm-modal[data-theme="clear"] #danger-confirm-title {
+    color: var(--danger-clear-color);
+}
+.danger-confirm-modal[data-theme="clear"] #danger-confirm-btn {
+    background-color: var(--danger-clear-color);
+}
+
+.danger-confirm-modal[data-theme="pull"] {
+    border-color: var(--danger-pull-color);
+}
+.danger-confirm-modal[data-theme="pull"] #danger-confirm-title {
+    color: var(--danger-pull-color);
+}
+.danger-confirm-modal[data-theme="pull"] #danger-confirm-btn {
+    background-color: var(--danger-pull-color);
+}
+
+.danger-confirm-modal[data-theme="push"] {
+    border-color: var(--danger-push-color);
+}
+.danger-confirm-modal[data-theme="push"] #danger-confirm-title {
+    color: var(--danger-push-color);
+}
+.danger-confirm-modal[data-theme="push"] #danger-confirm-btn {
+    background-color: var(--danger-push-color);
+}
+
+.danger-confirm-body p {
+    margin-bottom: 10px;
+    line-height: 1.5;
+    font-size: 13.5px;
+}
+.danger-confirm-body p:last-child {
+    margin-bottom: 0;
+}
+
+.danger-confirm-phrase-hint {
+    display: block;
+    margin-bottom: 6px;
+    font-size: 13px;
+}
+.danger-confirm-phrase-hint code {
+    background-color: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 1px 5px;
+    font-family: "Courier New", monospace;
+}
+
+#danger-confirm-input {
+    font-family: "Courier New", monospace;
+}
+
+.danger-confirm-status {
+    min-height: 18px;
+    margin-top: 10px;
+    font-size: 13px;
+}
+.danger-confirm-status-success {
+    color: #60c878;
+}
+.danger-confirm-status-error {
+    color: var(--danger-clear-color);
+}
+
+/* The Confirm button itself always renders with dark text against its
+   (light-ish) accent background, and gets visibly inert while disabled -
+   both matter a lot here since this is the actual "commit" button for a
+   destructive action. */
+.btn-danger-confirm {
+    color: #000;
+    font-weight: bold;
+    border: none;
+}
+.btn-danger-confirm:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    transform: none;
+}

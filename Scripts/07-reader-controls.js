@@ -272,6 +272,9 @@ const READER_BUTTON_ELEMENT_MAP = {
     openSelected: "btn-open-book",
     lastRead: "btn-last-read",
     hardReload: "btn-hard-reload",
+    clearLocalData: "btn-clear-local-data",
+    hardPull: "btn-hard-pull",
+    hardPush: "btn-hard-push",
 };
 
 function handleReaderButtonToggle(key, isChecked) {
