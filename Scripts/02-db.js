@@ -400,6 +400,31 @@ function recordReadingSessionStart(bookId) {
 */
 function appendReadingSession(bookId, sessionRecord) {
   if (!bookId || !db || !sessionRecord) return Promise.resolve(false);
+
+  // -----------------------------------------------------------------
+  // LOW-TIME & NO-PROGRESS DISCARD GUARD
+  // Discard tab-switches or brief opens under 60s OR where 0 pages were read
+  // -----------------------------------------------------------------
+const duration = sessionRecord.durationSeconds || 0;
+  const pages = sessionRecord.pagesRead || 0;
+
+  if (duration < 60 || pages === 0) {
+    console.log(`[02-db] Discarded noise session (${duration}s, ${pages} pages read)`);
+    
+    // Decrement totalSessions so the launcher count isn't inflated by quick peeks
+    const transaction = db.transaction([STORE_BOOKS], "readwrite");
+    const store = transaction.objectStore(STORE_BOOKS);
+    store.get(bookId).onsuccess = (e) => {
+      const record = e.target.result;
+      if (record && record.totalSessions > 0) {
+        record.totalSessions -= 1;
+        record.lastModified = Date.now();
+        store.put(record);
+      }
+    };
+
+    return Promise.resolve(false);
+  }
   return new Promise((resolve) => {
     const transaction = db.transaction([STORE_BOOKS], "readwrite");
     const store = transaction.objectStore(STORE_BOOKS);
