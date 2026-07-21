@@ -41,6 +41,10 @@
          10-utils.js (escapeHtml), 11-firebase-sync.js, and 12-notes.js, so it
          loads last. -->
     <script src="Scripts/15-danger-zone.js" defer></script>
+    <!-- Depends on 15-danger-zone.js (pushGroupToCloudForced,
+         pushNoteSettingsToCloudForced, safeParseLocalStorageJSON,
+         restoreLocalStorageJSON), so it loads after it. -->
+    <script src="Scripts/16-soft-sync.js" defer></script>
 </head>
 
 <body>
@@ -362,18 +366,35 @@
                     <input type="checkbox" id="toggle-btn-hard-push" checked onchange="handleReaderButtonToggle('hardPush', this.checked)">
                     <label for="toggle-btn-hard-push">Show Hard Push</label>
                 </div>
+                <div class="flex-gap8">
+                    <input type="checkbox" id="toggle-btn-soft-pull" checked onchange="handleReaderButtonToggle('softPull', this.checked)">
+                    <label for="toggle-btn-soft-pull">Show Soft Pull</label>
+                </div>
+                <div class="flex-gap8">
+                    <input type="checkbox" id="toggle-btn-soft-push" checked onchange="handleReaderButtonToggle('softPush', this.checked)">
+                    <label for="toggle-btn-soft-push">Show Soft Push</label>
+                </div>
             </div>
 
             <div class="sidebar-heading danger-zone-heading">⚠️ Danger Zone / Sync Recovery</div>
             <div class="control-item control-item-top">
                 <span class="hint-text">
                     These are recovery tools for when automatic sync fails or local/cloud data
-                    disagree (common on mobile). Each requires typing a confirmation phrase.
+                    disagree (common on mobile). Soft Pull/Push let you review differences first;
+                    Hard Pull/Push and Clear require typing a confirmation phrase.
                 </span>
                 <div class="danger-zone-buttons">
                     <button id="btn-clear-local-data" class="btn-danger-clear" onclick="promptClearLocalData()"
                         title="Deletes all local books, groups, notes, tags, and settings on this device. Cloud data is untouched.">
                         🗑️ Clear Local Data
+                    </button>
+                    <button id="btn-soft-pull" class="btn-soft-pull" onclick="promptSoftPull()"
+                        title="Compares local vs. cloud and lets you review and selectively pull down differences.">
+                        ⬇️🔍 Soft Pull (Review Cloud Changes)
+                    </button>
+                    <button id="btn-soft-push" class="btn-soft-push" onclick="promptSoftPush()"
+                        title="Compares local vs. cloud and lets you review and selectively push up differences.">
+                        ⬆️🔍 Soft Push (Review Local Changes)
                     </button>
                     <button id="btn-hard-pull" class="btn-danger-pull" onclick="promptHardPull()"
                         title="Discards local data and rebuilds it from the cloud.">
@@ -582,6 +603,46 @@
             <div class="modal-actions">
                 <button id="danger-confirm-cancel-btn" class="btn-ghost" onclick="closeDangerConfirmModal()">Cancel</button>
                 <button id="danger-confirm-btn" class="btn-danger-confirm" disabled onclick="submitDangerConfirmModal()">Confirm</button>
+            </div>
+        </div>
+    </dialog>
+
+    <!--
+     Soft Pull / Soft Push review modal (16-soft-sync.js). Deliberately
+     much larger than the other dialogs on this page since it needs to
+     show a scrollable list of individual changes, not just a short
+     confirmation message.
+    -->
+    <dialog id="soft-sync-modal" class="custom-modal soft-sync-modal">
+        <div class="modal-content">
+            <h3 id="soft-sync-title">Review Changes</h3>
+            <div id="soft-sync-subtitle" class="soft-sync-subtitle"></div>
+            <hr class="hr-divider-spaced" />
+
+            <div id="soft-sync-summary-counts" class="soft-sync-summary-counts">
+                <div class="soft-sync-empty-state">Comparing…</div>
+            </div>
+
+            <div id="soft-sync-run-state-label" class="soft-sync-run-state-label"></div>
+
+            <div id="soft-sync-operation-list" class="soft-sync-operation-list"></div>
+
+            <hr class="hr-divider-tight" />
+
+            <div class="soft-sync-apply-row">
+                <button id="soft-sync-apply-all-btn" class="btn-accent btn-compact" onclick="runSoftSyncQueue(null)">Apply All</button>
+                <button id="soft-sync-apply-additions-btn" class="btn-ghost soft-sync-apply-additions-btn" onclick="runSoftSyncQueue('addition')">🟢 Apply Additions</button>
+                <button id="soft-sync-apply-updates-btn" class="btn-ghost soft-sync-apply-updates-btn" onclick="runSoftSyncQueue('update')">🔵 Apply Updates</button>
+                <button id="soft-sync-apply-removals-btn" class="btn-ghost soft-sync-apply-removals-btn" onclick="runSoftSyncQueue('removal')">🔴 Apply Removals</button>
+            </div>
+            <div class="soft-sync-apply-row">
+                <button id="soft-sync-pause-btn" class="btn-ghost" style="display:none;" onclick="pauseSoftSyncQueue()">⏸️ Pause</button>
+                <button id="soft-sync-resume-btn" class="btn-accent btn-compact" style="display:none;" onclick="resumeSoftSyncQueue()">▶️ Resume</button>
+                <button id="soft-sync-cancel-btn" class="btn-danger-clear" style="display:none;" onclick="cancelSoftSyncQueue()">✖ Cancel Remaining</button>
+            </div>
+
+            <div class="modal-actions">
+                <button class="btn-accent btn-compact" onclick="closeSoftSyncModal()">Close</button>
             </div>
         </div>
     </dialog>

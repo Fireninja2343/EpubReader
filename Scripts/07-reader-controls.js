@@ -275,6 +275,8 @@ const READER_BUTTON_ELEMENT_MAP = {
     clearLocalData: "btn-clear-local-data",
     hardPull: "btn-hard-pull",
     hardPush: "btn-hard-push",
+    softPull: "btn-soft-pull",
+    softPush: "btn-soft-push",
 };
 
 function handleReaderButtonToggle(key, isChecked) {

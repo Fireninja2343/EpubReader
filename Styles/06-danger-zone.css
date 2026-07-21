@@ -17,6 +17,9 @@
     --danger-clear-color: #e05d5d;
     --danger-pull-color: #4d9fe0;
     --danger-push-color: #e0954d;
+    --soft-sync-addition-color: #5dd382;
+    --soft-sync-update-color: #4d9fe0;
+    --soft-sync-removal-color: #e05d5d;
 }
 
 .danger-zone-heading {
@@ -160,6 +163,187 @@
     border: none;
 }
 .btn-danger-confirm:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    transform: none;
+}
+
+/* =================================================================
+   SOFT PULL / SOFT PUSH — REVIEW MODAL
+   See 16-soft-sync.js. Softer, exploratory styling (dashed border,
+   lighter fill) distinguishes these two buttons from the Hard Pull/Push
+   pair right below them, even though they share the same blue/orange
+   directional coloring so the pull-vs-push meaning stays consistent.
+   ================================================================= */
+
+.btn-soft-pull {
+    border: 2px dashed var(--danger-pull-color);
+    color: var(--danger-pull-color);
+    background-color: rgba(77, 159, 224, 0.05);
+    padding: 10px 12px;
+    font-weight: 600;
+    text-align: left;
+}
+.btn-soft-pull:hover {
+    background-color: rgba(77, 159, 224, 0.15);
+    border-color: var(--danger-pull-color);
+}
+
+.btn-soft-push {
+    border: 2px dashed var(--danger-push-color);
+    color: var(--danger-push-color);
+    background-color: rgba(224, 149, 77, 0.05);
+    padding: 10px 12px;
+    font-weight: 600;
+    text-align: left;
+}
+.btn-soft-push:hover {
+    background-color: rgba(224, 149, 77, 0.15);
+    border-color: var(--danger-push-color);
+}
+
+.soft-sync-modal {
+    width: min(640px, 92vw);
+}
+
+.soft-sync-subtitle {
+    color: var(--text-muted);
+    font-size: 13px;
+    margin-top: 2px;
+}
+
+.soft-sync-summary-counts {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin: 10px 0;
+}
+
+.soft-sync-count-chip {
+    padding: 6px 10px;
+    border-radius: 14px;
+    font-size: 13px;
+    font-weight: 600;
+    background-color: var(--bg-card);
+    border: 1px solid var(--border);
+}
+.soft-sync-count-chip.soft-sync-count-addition { border-color: var(--soft-sync-addition-color); color: var(--soft-sync-addition-color); }
+.soft-sync-count-chip.soft-sync-count-update { border-color: var(--soft-sync-update-color); color: var(--soft-sync-update-color); }
+.soft-sync-count-chip.soft-sync-count-removal { border-color: var(--soft-sync-removal-color); color: var(--soft-sync-removal-color); }
+
+.soft-sync-empty-state {
+    color: var(--text-muted);
+    font-size: 13.5px;
+}
+
+.soft-sync-run-state-label {
+    min-height: 18px;
+    font-size: 13px;
+    font-weight: 600;
+    margin-bottom: 6px;
+}
+.soft-sync-state-running { color: var(--danger-pull-color); }
+.soft-sync-state-paused { color: var(--danger-push-color); }
+.soft-sync-state-done { color: var(--soft-sync-addition-color); }
+
+.soft-sync-operation-list {
+    max-height: 320px;
+    overflow-y: auto;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px;
+    background-color: var(--bg-main);
+}
+
+.soft-sync-type-section {
+    margin-bottom: 12px;
+}
+.soft-sync-type-section:last-child {
+    margin-bottom: 0;
+}
+
+.soft-sync-type-heading {
+    font-weight: 700;
+    font-size: 13.5px;
+    padding: 4px 2px;
+    color: var(--text-main);
+}
+.soft-sync-type-count {
+    color: var(--text-muted);
+    font-weight: 400;
+}
+
+.soft-sync-op-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.soft-sync-op-row {
+    display: grid;
+    grid-template-columns: 20px 1fr auto;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    border-radius: 4px;
+    background-color: var(--bg-card);
+    font-size: 13px;
+    border-left: 3px solid transparent;
+}
+.soft-sync-op-row-addition { border-left-color: var(--soft-sync-addition-color); }
+.soft-sync-op-row-update { border-left-color: var(--soft-sync-update-color); }
+.soft-sync-op-row-removal { border-left-color: var(--soft-sync-removal-color); }
+
+.soft-sync-op-category {
+    text-align: center;
+}
+
+.soft-sync-op-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text-main);
+}
+
+.soft-sync-op-status {
+    white-space: nowrap;
+    font-size: 12px;
+    color: var(--text-muted);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.soft-sync-op-error {
+    color: var(--danger-clear-color);
+    max-width: 220px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.soft-sync-status-running {
+    background-color: rgba(77, 159, 224, 0.12);
+}
+.soft-sync-status-done {
+    opacity: 0.65;
+}
+.soft-sync-status-error {
+    background-color: rgba(224, 93, 93, 0.12);
+}
+
+.soft-sync-apply-row {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-top: 10px;
+}
+
+.soft-sync-apply-additions-btn { border-color: var(--soft-sync-addition-color); color: var(--soft-sync-addition-color); }
+.soft-sync-apply-updates-btn { border-color: var(--soft-sync-update-color); color: var(--soft-sync-update-color); }
+.soft-sync-apply-removals-btn { border-color: var(--soft-sync-removal-color); color: var(--soft-sync-removal-color); }
+
+.soft-sync-apply-row button:disabled {
     opacity: 0.4;
     cursor: not-allowed;
     transform: none;
