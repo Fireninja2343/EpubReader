@@ -103,6 +103,27 @@ const SYNC_TYPE_REGISTRY = [
       // difference should show up as different content either way.
       readingSessions: JSON.stringify(rec.readingSessions ?? []),
       readingHistory: JSON.stringify(rec.readingHistory ?? []),
+      /*
+       File-upload completeness signal (claim #4 fix): book metadata can
+       match perfectly on both sides even when the actual EPUB binary
+       upload was interrupted partway through pushBookFileToCloud() -
+       chunkCount is only ever written as that function's LAST step, once
+       every chunk has actually landed (see downloadBookFromCloud()'s own
+       `if (!remoteMeta.chunkCount) return;` guard, which treats a
+       missing/falsy chunkCount as "not ready to trust yet"). Without this
+       field, an interrupted upload would show as "already in sync" here
+       with nothing prompting a re-push.
+
+       A local record reports simply "do I have file data at all" (true/
+       false) since local never stores a chunkCount of its own - it isn't
+       a chunked format locally, only in Firestore. A remote record
+       reports "does chunkCount look complete" (true/false). Comparing
+       those two booleans catches exactly the mismatch that matters: local
+       has a file, but the cloud's chunkCount says its copy isn't usable
+       yet - without needing to actually re-encode the local file to
+       compute its *exact* expected chunk count just to check this.
+      */
+      hasUsableFile: rec.fileData !== undefined ? !!rec.fileData : !!rec.chunkCount,
     }),
     applyAddition: async (record, direction) => {
       if (direction === "pull") {
@@ -133,6 +154,17 @@ const SYNC_TYPE_REGISTRY = [
         await applyRemoteBookUpdate(localRec.id, remoteRec);
       } else {
         await pushBookMetadataToCloud(localRec);
+        // If this update was triggered (wholly or partly) by the cloud's
+        // file upload looking incomplete - see hasUsableFile in
+        // fieldsToCompare above - pushing metadata alone would never fix
+        // that: chunkCount only gets a valid value from actually re-running
+        // pushBookFileToCloud(). Re-checking here (rather than always
+        // re-uploading the file on every metadata-only update) keeps a
+        // plain metadata change - e.g. renaming a book - from re-uploading
+        // the whole EPUB binary for no reason.
+        if (!remoteRec.chunkCount && localRec.fileData) {
+          await pushBookFileToCloud(localRec);
+        }
       }
     },
     applyRemoval: async (id, direction) => {

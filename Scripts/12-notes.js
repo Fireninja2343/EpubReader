@@ -90,7 +90,44 @@ function fetchNotesLibrary() {
   };
   transaction.oncomplete = () => {
     renderNotesPageIfOpen();
+    /*
+     Fire-and-forget backfill for notes/note tags created before
+     lastModified was stamped at write time (see updateNoteFields(),
+     createNoteTag(), etc. elsewhere in this file). Reuses the exact same
+     generic backfillMissingField() primitive books/groups use in
+     02-db.js's migrateMissingLastModified() - see that function's doc
+     comment for the full rationale. A no-op once every note/tag already
+     has one, so this is safe to call on every fetch.
+    */
+    if (typeof migrateMissingNoteLastModified === "function") {
+      migrateMissingNoteLastModified();
+    }
   };
+}
+
+/*
+ Notes/tags counterpart to migrateMissingLastModified() in 02-db.js - see
+ that function's doc comment for the shared rationale. dateCreated is the
+ best available "when was this actually touched" signal for a note that
+ predates lastModified (there's no equivalent of a book's lastOpened for
+ notes), so it's used as the backfilled value rather than an arbitrary
+ "right now" that would make an old, untouched note look freshly edited.
+*/
+function migrateMissingNoteLastModified() {
+  backfillMissingField(
+    STORE_NOTES,
+    (note) => !note.lastModified,
+    (note) => note.dateCreated || Date.now(),
+    "lastModified",
+    typeof pushNoteToCloud === "function" ? pushNoteToCloud : null,
+  );
+  backfillMissingField(
+    STORE_NOTE_GROUPS,
+    (tag) => !tag.lastModified,
+    () => Date.now(),
+    "lastModified",
+    typeof pushNoteTagToCloud === "function" ? pushNoteTagToCloud : null,
+  );
 }
 
 // Re-renders the Notes page and/or the tag-management list only if
@@ -324,6 +361,9 @@ function submitNoteEditorForm() {
     bookId: bookId,
     bookTitle: bookTitle,
     dateCreated: Date.now(),
+    // See the comment on updateNoteFields() above for why this matters -
+    // stamped at creation for the same reason edits stamp it.
+    lastModified: Date.now(),
   };
 
   const transaction = db.transaction([STORE_NOTES], "readwrite");
@@ -650,6 +690,17 @@ function updateNoteFields(noteId, changes) {
     const record = e.target.result;
     if (record) {
       Object.assign(record, changes);
+      /*
+       Stamped here, at the moment of the actual local edit, rather than
+       only after a successful cloud push (see stampLocalNoteLastModified()
+       in 11-firebase-sync.js, kept as a second line of defense for pushes
+       triggered elsewhere, e.g. Hard Push/Soft Sync). Local notes/tags
+       previously had NO lastModified field at all, which meant
+       pullInitialSyncFromCloud()'s conflict comparison always read the
+       local side as 0 and the cloud copy won unconditionally, even when
+       the local edit was the newer one and simply hadn't been pushed yet.
+      */
+      record.lastModified = Date.now();
       store.put(record);
       updatedRecord = record;
     }
@@ -752,6 +803,9 @@ function updateNoteTag(tagId, changes) {
     const record = e.target.result;
     if (record) {
       Object.assign(record, changes);
+      // See the comment on updateNoteFields() above (same file) for why -
+      // same fix, applied to tags.
+      record.lastModified = Date.now();
       store.put(record);
       updatedRecord = record;
     }
@@ -774,7 +828,7 @@ function createNoteTag() {
     .toString(16)
     .padStart(6, "0")}`;
 
-  const newTag = { name: "New Tag", color: randomColor };
+  const newTag = { name: "New Tag", color: randomColor, lastModified: Date.now() };
   const transaction = db.transaction([STORE_NOTE_GROUPS], "readwrite");
   transaction.objectStore(STORE_NOTE_GROUPS).add(newTag).onsuccess = (e) => {
     newTag.id = e.target.result;
@@ -799,6 +853,7 @@ function deleteNoteTag(tagId) {
     e.target.result.forEach((note) => {
       if (note.tagIds && note.tagIds.includes(tagId)) {
         note.tagIds = note.tagIds.filter((id) => id !== tagId);
+        note.lastModified = Date.now();
         notesStore.put(note);
         notesToRepush.push(note);
       }

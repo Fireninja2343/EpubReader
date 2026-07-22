@@ -80,6 +80,18 @@ function fetchLocalLibrary() {
       if (typeof migrateMissingBookMetadata === "function") {
         migrateMissingBookMetadata();
       }
+      /*
+       Fire-and-forget, same treatment as migrateMissingBookMetadata()
+       just above: backfills lastModified on any book/group that predates
+       it being stamped at write time (see backfillMissingField() and
+       migrateMissingLastModified() above). A no-op (zero writes) once
+       every record already has one, so calling it after every fetch
+       costs nothing on repeat visits - same reasoning as the metadata
+       migration above.
+      */
+      if (typeof migrateMissingLastModified === "function") {
+        migrateMissingLastModified();
+      }
     };
   };
 }
@@ -249,6 +261,112 @@ function estimateCompletionDate(book) {
 }
 
 /*
+ -----------------------------------------------------------------
+ GENERIC FIELD-BACKFILL MIGRATION PRIMITIVE
+ The sync system (11-firebase-sync.js) relies on every synced record
+ having a lastModified timestamp to decide which side of a local/cloud
+ conflict is newer - see pullInitialSyncFromCloud(). Older records (books,
+ groups, notes, note tags created before lastModified was stamped at
+ write time) may not have one, and a record with no lastModified reads as
+ lastModified 0 - the oldest possible value - which is BY DESIGN what lets
+ a genuinely newer copy on the other side win. But two records that both
+ have no lastModified are indistinguishable from "tied," which is exactly
+ the ambiguous case worth resolving once, locally, rather than leaving
+ forever.
+
+ backfillMissingField() is a single, reusable implementation of that
+ backfill, parameterized so it works for any store and any field rather
+ than needing one hand-written migration function per data type (the
+ pattern migrateMissingCompletionDates() below and
+ migrateMissingBookMetadata() in 06-epub-reader.js both predate this and
+ duplicate their own scan-and-backfill loop - this is the generalized
+ version future migrations should call into instead of copying that
+ pattern again).
+
+ Parameters:
+   storeName    - which IndexedDB object store to scan
+   isMissing(record)   -> true if this record needs backfilling
+   computeValue(record) -> the value to assign for the missing field
+   fieldName    - property name to set with computeValue()'s result
+   pushFn(record)  - optional; called (fire-and-forget, matching every
+                     other push call site in this codebase) once per
+                     backfilled record so the cloud picks up the new
+                     value too, not just this device
+
+ Resolves to the number of records backfilled, so a caller can log or
+ surface a count the same way migrateMissingCompletionDates() already does.
+ Only ever touches records that are actually missing the field - this is
+ a no-op (zero writes) on every call after the first migration for a
+ given store/field, so it's always safe and cheap to call unconditionally
+ on every load rather than needing its own "have I already migrated"
+ flag - the emptiness of what it finds to backfill IS that flag.
+ -----------------------------------------------------------------
+*/
+function backfillMissingField(storeName, isMissing, computeValue, fieldName, pushFn) {
+  return new Promise((resolve) => {
+    if (!db) {
+      resolve(0);
+      return;
+    }
+    const transaction = db.transaction([storeName], "readwrite");
+    const store = transaction.objectStore(storeName);
+    const request = store.getAll();
+    const updatedRecords = [];
+    request.onsuccess = () => {
+      const allRecords = request.result;
+      for (const record of allRecords) {
+        if (isMissing(record)) {
+          record[fieldName] = computeValue(record);
+          store.put(record);
+          updatedRecords.push(record);
+        }
+      }
+    };
+    transaction.oncomplete = () => {
+      if (typeof pushFn === "function") {
+        updatedRecords.forEach((r) => pushFn(r));
+      }
+      resolve(updatedRecords.length);
+    };
+    transaction.onerror = () => resolve(0);
+  });
+}
+
+/*
+ Runs the lastModified backfill for every currently-synced local data
+ type (books, groups; notes/note tags are handled by
+ migrateMissingNoteLastModified() in 12-notes.js, called from
+ fetchNotesLibrary() the same way this is called from fetchLocalLibrary()
+ below). Adding a future synced store to this backfill is one more
+ backfillMissingField() call here (or in whichever file owns that store's
+ fetch-on-load hook), not a new migration function.
+
+ estimateLastModifiedFallback() picks the best available "this record was
+ last touched around here" signal for the field types this backfill
+ currently covers, so a backfilled timestamp is at least a reasonable
+ guess at true edit recency rather than an arbitrary "right now" that
+ would make an old, never-recently-touched record look freshly edited
+ (and therefore wrongly win a future sync conflict against a genuinely
+ more recent cloud copy).
+*/
+function migrateMissingLastModified() {
+  backfillMissingField(
+    STORE_BOOKS,
+    (book) => !book.lastModified,
+    (book) => book.lastOpened || book.dateImported || Date.now(),
+    "lastModified",
+    typeof pushBookMetadataToCloud === "function" ? pushBookMetadataToCloud : null,
+  );
+  backfillMissingField(
+    STORE_GROUPS,
+    (group) => !group.lastModified,
+    () => Date.now(),
+    "lastModified",
+    typeof pushGroupToCloud === "function" ? pushGroupToCloud : null,
+  );
+}
+
+/*
  Finds every book where isRead is true but completedDate is missing
  (older completions predating that field) and backfills it using
  estimateCompletionDate() above. Never overwrites a completedDate that's
@@ -400,17 +518,10 @@ function recordReadingSessionStart(bookId) {
 */
 function appendReadingSession(bookId, sessionRecord) {
   if (!bookId || !db || !sessionRecord) return Promise.resolve(false);
-
-  // -----------------------------------------------------------------
-  // LOW-TIME & NO-PROGRESS DISCARD GUARD
-  // Discard tab-switches or brief opens under 60s OR where 0 pages were read
-  // -----------------------------------------------------------------
-const duration = sessionRecord.durationSeconds || 0;
+  const duration = sessionRecord.durationSeconds || 0;
   const pages = sessionRecord.pagesRead || 0;
-
   if (duration < 60 || pages === 0) {
     console.log(`[02-db] Discarded noise session (${duration}s, ${pages} pages read)`);
-    
     // Decrement totalSessions so the launcher count isn't inflated by quick peeks
     const transaction = db.transaction([STORE_BOOKS], "readwrite");
     const store = transaction.objectStore(STORE_BOOKS);
@@ -422,7 +533,6 @@ const duration = sessionRecord.durationSeconds || 0;
         store.put(record);
       }
     };
-
     return Promise.resolve(false);
   }
   return new Promise((resolve) => {
@@ -435,7 +545,7 @@ const duration = sessionRecord.durationSeconds || 0;
         if (!Array.isArray(record.readingSessions)) record.readingSessions = [];
         record.readingSessions.push(sessionRecord);
         const cap = Config.Reading.MAX_STORED_SESSIONS_PER_BOOK;
-        if (record.readingSessions.length > cap) {
+        if (duration > cap) {
           record.readingSessions = record.readingSessions.slice(-cap);
         }
         record.lastModified = new Date().getTime();
@@ -516,14 +626,21 @@ function upsertReadingHistoryEntry(bookId, entry) {
   });
 }
 
+const FORCE_PUSH_MIN_GAP_MS = Config.Sync.FORCE_PUSH_MIN_GAP_MS;
+let lastForcedCloudProgressPush = {};
 function forcePushBookProgressToCloud(bookId) {
   if (!bookId || typeof pushBookMetadataToCloud !== "function") return;
+  const now = Date.now();
+  const lastForced = lastForcedCloudProgressPush[bookId] || 0;
+  if (now - lastForced < FORCE_PUSH_MIN_GAP_MS) return;
+  lastForcedCloudProgressPush[bookId] = now;
+
   const transaction = db.transaction([STORE_BOOKS], "readonly");
   const store = transaction.objectStore(STORE_BOOKS);
   store.get(bookId).onsuccess = (e) => {
     const record = e.target.result;
     if (record) {
-      lastCloudProgressPush[bookId] = Date.now();
+      lastCloudProgressPush[bookId] = now;
       pushBookMetadataToCloud(record);
     }
   };

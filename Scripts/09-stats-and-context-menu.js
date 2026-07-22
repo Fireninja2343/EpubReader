@@ -107,12 +107,33 @@ function stopActiveReadingTimer() {
 function saveTimeToDB() {
     if (!activeBookObject || !activeBookObject.id) return;
 
+    const now = new Date().getTime();
     const transaction = db.transaction([Config.Db.STORE_BOOKS], "readwrite");
     const store = transaction.objectStore(Config.Db.STORE_BOOKS);
     store.get(activeBookObject.id).onsuccess = (e) => {
         const record = e.target.result;
         if (record) {
             record.timeSpentSeconds = activeBookObject.timeSpentSeconds;
+            /*
+             Root-cause fix: this write previously never touched
+             lastModified, unlike every other book-mutating write path in
+             the app (updateBookProgressInDB(), markBookAsRead(), the
+             toggleRead/group context-menu actions above, etc. - all of
+             them stamp it). Firestore's sync model (pullInitialSyncFromCloud()
+             in 11-firebase-sync.js) decides which side of a conflict is
+             newer purely by comparing lastModified - a timeSpentSeconds
+             update that doesn't bump it is therefore invisible to that
+             comparison. Concretely: read on mobile for 4 minutes ->
+             timeSpentSeconds updates and gets pushed to the cloud, but
+             under whatever stale lastModified this book already had ->
+             desktop's own local lastModified for that book can easily be
+             equal-or-newer -> desktop's pull never sees the cloud copy as
+             newer -> desktop keeps displaying its own old
+             timeSpentSeconds forever, permanently diverged from the
+             cloud/mobile despite both being "synced." Stamping it here
+             closes that gap the same way every other mutation already does.
+            */
+            record.lastModified = now;
             store.put(record);
         }
     };
@@ -126,6 +147,14 @@ function saveTimeToDB() {
      tab crashes or closes unexpectedly.
     */
     if (typeof persistHistorySegment === "function") persistHistorySegment();
+
+    /*
+     Mirrors the same stamped lastModified back into activeBookObject (the
+     in-memory copy the rest of the reader UI reads from), consistent with
+     how recordReadingSessionStart()/appendReadingSession() (02-db.js)
+     already mirror their own writes back into activeBookObject.
+    */
+    activeBookObject.lastModified = now;
 }
 
 // =================================================================
@@ -543,7 +572,7 @@ async function openBookDiagnosticsModal(bookObj, modeType) {
     */
     try {
         const freshBook = await ensureBookMetadataCached(bookObj);
-        const computedMinutes = Math.round((freshBook.timeSpentSeconds || 0) / 60);
+        const computedMinutes = getMeaningfulTrackedMinutes(freshBook.timeSpentSeconds);
         const chapterCount = freshBook.chapterCount ?? "—";
         const estimatedPagesCount = freshBook.totalPages ?? "—";
 
@@ -1161,7 +1190,7 @@ async function showStatsViewState() {
     // Loop through memory records - all numbers below come straight off
     // each book's cached fields, no EPUB is opened here.
     for (const book of loadedBooksMemory) {
-        combinedSecondsTracked += (book.timeSpentSeconds || 0);
+        combinedSecondsTracked += getMeaningfulTrackedSeconds(book.timeSpentSeconds);
         totalReadingSessions += (book.totalSessions || 0);
 
         if (Array.isArray(book.readingSessions) && book.readingSessions.length > 0) {
@@ -1172,7 +1201,7 @@ async function showStatsViewState() {
             }
         } else if (book.totalSessions > 0) {
             // Fallback for books with no real session log: same approximation used before this feature existed
-            sessionTime += book.timeSpentSeconds / 60 || 0;
+            sessionTime += getMeaningfulTrackedMinutes(book.timeSpentSeconds);
         }
 
         const totalPages = book.totalPages || 0;
@@ -1250,26 +1279,30 @@ async function showStatsViewState() {
         globalTotalPagesRead += pagesRead;
         globalTotalWordsRead += wordsRead;
 
-        const mins = Math.round((book.timeSpentSeconds || 0) / 60);
+        const meaningfulTrackedSeconds = getMeaningfulTrackedSeconds(book.timeSpentSeconds);
+        const mins = getMeaningfulTrackedMinutes(book.timeSpentSeconds);
         if (mins > 0) timedPagesRead += pagesRead;
 
         /*
          Reading Speed Over Lifetime: completed books only, needs both a
-         completedDate (for chronological sorting) and tracked reading
-         time (timeSpentSeconds > 0, so a division isn't done by zero).
-         Carries the same mins/completionDurationMs/pagesPerDay fields as
-         perBookMetrics below (rather than just pagesPerHour) so this list
-         can reuse buildStatDeltaHtml/buildStatsRowHtml instead of the
-         lifetime view needing its own parallel metric-formatting logic -
-         see renderReadingSpeedProgression().
+         completedDate (for chronological sorting) and MEANINGFUL tracked
+         reading time - previously gated on the raw "timeSpentSeconds > 0"
+         (any nonzero value, however tiny) and divided by the raw,
+         unrounded seconds directly. That let a book with e.g. 6 tracked
+         seconds produce an absurd pages/hour figure (344 pages / (6/3600)
+         hours = 206,400 p/h) in this list even though the main per-book
+         table correctly showed "0m" for that same book - see
+         getMeaningfulTrackedSeconds() in 10-utils.js, now the single
+         shared gate both this and the main table's `mins` above go
+         through, so they can never disagree again.
         */
-        if (isRead && book.completedDate && totalPages > 0 && (book.timeSpentSeconds || 0) > 0) {
-            const trackedReadingHours = book.timeSpentSeconds / 3600;
+        if (isRead && book.completedDate && totalPages > 0 && meaningfulTrackedSeconds > 0) {
+            const trackedReadingHours = meaningfulTrackedSeconds / 3600;
             speedProgressionEntries.push({
                 book,
                 completedDate: book.completedDate,
                 pagesPerHour: totalPages / trackedReadingHours,
-                mins: Math.round(book.timeSpentSeconds / 60),
+                mins: getMeaningfulTrackedMinutes(book.timeSpentSeconds),
                 completionDurationMs,
                 pagesPerDay,
             });
@@ -1329,7 +1362,7 @@ async function showStatsViewState() {
 
     // --- MATH COMPILATIONS & UI UPDATES ---
     const totalMins = Math.round(combinedSecondsTracked / 60);
-    const booksWithTime = loadedBooksMemory.filter(b => (b.timeSpentSeconds || 0) > 0).length;
+    const booksWithTime = loadedBooksMemory.filter(b => getMeaningfulTrackedSeconds(b.timeSpentSeconds) > 0).length;
     const avgMins = booksWithTime ? Math.round(totalMins / booksWithTime) : 0;
     const avgPagesPerHour = totalMins ? (timedPagesRead / totalMins * 60).toFixed(1): "—";
 

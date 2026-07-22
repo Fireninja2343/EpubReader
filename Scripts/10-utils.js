@@ -353,6 +353,34 @@ function base64ToBlob(base64) {
   return new Blob([new Uint8Array(array)], { type: mime });
 }
 
+/*
+ Single source of truth for "does this book's tracked timeSpentSeconds
+ count as real reading time, or is it noise" (a few accidental seconds
+ from an open-then-immediately-close, a stray tap, etc.) - see
+ Config.Reading.MIN_MEANINGFUL_TRACKED_SECONDS for the threshold itself
+ and the rationale for its value.
+
+ Returns 0 for anything below the threshold, or the value unchanged
+ otherwise - callers should route every use of a book's timeSpentSeconds
+ through this (or the minutes-returning variant below) rather than
+ reading book.timeSpentSeconds directly, so a tiny tracked value can never
+ register as nonzero reading time, distort an average/min/max, or feed
+ into a per-hour rate calculation in one place while correctly showing as
+ "0m" in another - see the "Reading Speed Over Lifetime" bug this closes
+ in 09-stats-and-context-menu.js, which previously used raw
+ timeSpentSeconds directly instead of going through this check.
+*/
+function getMeaningfulTrackedSeconds(rawSeconds) {
+    const seconds = rawSeconds || 0;
+    return seconds >= Config.Reading.MIN_MEANINGFUL_TRACKED_SECONDS ? seconds : 0;
+}
+
+// Minutes-returning convenience wrapper, since most stats-view call sites
+// want mins = Math.round(seconds / 60) immediately afterward anyway.
+function getMeaningfulTrackedMinutes(rawSeconds) {
+    return Math.round(getMeaningfulTrackedSeconds(rawSeconds) / 60);
+}
+
 function formatMinutes(mins) {
     const h = Math.floor(mins / 60);
     const m = Math.round((mins % 60)*10)/10;

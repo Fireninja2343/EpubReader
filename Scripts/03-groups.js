@@ -126,19 +126,34 @@ function submitGroupModalForm() {
         // EXECUTE RE-WRITE EDIT PROCESS TRACES
         const transaction = db.transaction([STORE_GROUPS], "readwrite");
         const store = transaction.objectStore(STORE_GROUPS);
+        let updatedRecord = null;
         store.get(parseInt(idVal)).onsuccess = (e) => {
             const record = e.target.result;
             if (record) {
                 record.name = nameVal;
                 record.backgroundColor = colorVal;
+                /*
+                 Stamped here, at the moment of the actual local edit, rather
+                 than only ever being set after a successful cloud push (see
+                 stampLocalGroupLastModified() in 11-firebase-sync.js, which
+                 remains as a second line of defense for pushes triggered from
+                 elsewhere, e.g. Hard Push/Soft Sync). Without this, a group
+                 renamed while offline (or while a push is still in-flight/
+                 retrying) would have no local lastModified at all, so
+                 pullInitialSyncFromCloud()'s conflict comparison would have
+                 nothing trustworthy to compare against until the push
+                 eventually succeeds - this closes that gap at the source.
+                */
+                record.lastModified = new Date().getTime();
                 store.put(record);
+                updatedRecord = record;
             }
         };
         transaction.oncomplete = () => {
             closeGroupModal();
             fetchLocalLibrary();
-            if (typeof pushGroupToCloud === "function") {
-                pushGroupToCloud({ id: parseInt(idVal), name: nameVal, backgroundColor: colorVal });
+            if (updatedRecord && typeof pushGroupToCloud === "function") {
+                pushGroupToCloud(updatedRecord);
             }
         };
     } else {
@@ -146,14 +161,17 @@ function submitGroupModalForm() {
         const transaction = db.transaction([STORE_GROUPS], "readwrite");
         const store = transaction.objectStore(STORE_GROUPS);
         let newGroupId = null;
-        store.add({ name: nameVal, backgroundColor: colorVal }).onsuccess = (e) => {
+        // Stamped at creation time for the same reason as the edit branch
+        // above - see that comment for the full rationale.
+        const createdAt = new Date().getTime();
+        store.add({ name: nameVal, backgroundColor: colorVal, lastModified: createdAt }).onsuccess = (e) => {
             newGroupId = e.target.result;
         };
         transaction.oncomplete = () => {
             closeGroupModal();
             fetchLocalLibrary();
             if (typeof pushGroupToCloud === "function") {
-                pushGroupToCloud({ id: newGroupId, name: nameVal, backgroundColor: colorVal });
+                pushGroupToCloud({ id: newGroupId, name: nameVal, backgroundColor: colorVal, lastModified: createdAt });
             }
         };
     }
