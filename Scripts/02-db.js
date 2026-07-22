@@ -545,7 +545,7 @@ function appendReadingSession(bookId, sessionRecord) {
         if (!Array.isArray(record.readingSessions)) record.readingSessions = [];
         record.readingSessions.push(sessionRecord);
         const cap = Config.Reading.MAX_STORED_SESSIONS_PER_BOOK;
-        if (duration > cap) {
+        if (record.readingSessions.length > cap) {
           record.readingSessions = record.readingSessions.slice(-cap);
         }
         record.lastModified = new Date().getTime();
