@@ -520,6 +520,28 @@
             </div>
         </div>
     </dialog>
+    <dialog id="start-date-modal" class="custom-modal">
+        <div class="modal-content">
+            <h3>Edit Start Date</h3>
+            <hr class="hr-divider-spaced" />
+
+            <input type="hidden" id="start-date-book-id">
+
+            <div class="control-item">
+                <label>Start Date</label>
+                <input type="date" id="start-date-input" class="full-width-input">
+            </div>
+
+            <div class="modal-actions">
+                <button onclick="document.getElementById('start-date-modal').close()" class="btn-ghost">
+                    Cancel
+                </button>
+                <button onclick="submitStartDateModalForm()" class="btn-accent">
+                    Save
+                </button>
+            </div>
+        </div>
+    </dialog>
 
     <div id="book-context-menu">
         <div class="context-item-row" onclick="triggerContextAction('metadata')">📋 View Metadata</div>
@@ -527,6 +549,7 @@
         <div class="context-item-row" onclick="triggerContextAction('stats')">📊 Book Analytics</div>
         <div class="context-item-row" onclick="triggerContextAction('group')">📁 Manage Group</div>
         <div class="context-item-row" onclick="triggerContextAction('backfillCompletionDate')">📅 Backfill Completion Date</div>
+        <div class="context-item-row" onclick="triggerContextAction('editStartDate')">📖 Edit Start Date</div>
         <div class="context-item-row" onclick="triggerContextAction('editCompletionDate')">📆 Edit Completion Date</div>
         <div class="context-item-row" onclick="triggerContextAction('clearCompletionDate')">🗓️ Clear Completion Date</div>
         <hr class="hr-divider-tight">

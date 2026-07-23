@@ -287,75 +287,67 @@ function triggerContextAction(actionKey) {
     const targetBookObj = loadedBooksMemory.find(b => b.id === currentActiveContextBookIndexId);
     if (!targetBookObj) return;
 
-    if (actionKey === 'delete') {
-        if (confirm(`Remove "${targetBookObj.title}" from library completely?`)) {
-            const transaction = db.transaction([Config.Db.STORE_BOOKS], "readwrite");
-            transaction.objectStore(Config.Db.STORE_BOOKS).delete(targetBookObj.id);
-            transaction.oncomplete = () => {
-                fetchLocalLibrary();
-                /* Mirror the deletion up to Firestore too. Without this call the
-                   book only disappears locally — the cloud doc (and its file
-                   chunks) stay behind, so the next sign-in or live-listener pull
-                   on any device just downloads it right back. */
-                if (typeof deleteBookFromCloud === "function") {
-                    deleteBookFromCloud(targetBookObj.id);
+    switch (actionKey) {
+        case "delete":
+            if (confirm(`Remove "${targetBookObj.title}" from library completely?`)) {
+                const transaction = db.transaction([Config.Db.STORE_BOOKS], "readwrite");
+                transaction.objectStore(Config.Db.STORE_BOOKS).delete(targetBookObj.id);
+                transaction.oncomplete = () => {
+                    fetchLocalLibrary();
+                    if (typeof deleteBookFromCloud === "function") {deleteBookFromCloud(targetBookObj.id);}
+                }; } break;
+        case "toggleRead":
+            updateBookRecord(targetBookObj.id, (r) => {
+                r.isRead = !r.isRead;
+                r.completedDate = r.isRead ? (r.completedDate || new Date().getTime()) : null;
+            }).then(() => fetchLocalLibrary()); break;
+        case "backfillCompletionDate":
+            migrateSingleBookCompletionDate(targetBookObj.id).then((wasUpdated) => {
+                if (wasUpdated) {
+                    refreshLibraryAndVisibleStats();
+                } else {
+                    alert("This book doesn't need a completion date backfill (already has one, or isn't marked read).");
                 }
-            };
-        }
-    } else if (actionKey === 'toggleRead') {
-        updateBookRecord(targetBookObj.id, (r) => {
-            r.isRead = !r.isRead; // Toggle binary state
-            /* Manual toggling should track completedDate the same way the
-               automatic markBookAsRead() path does: set it the moment the
-               book becomes read (unless it already has one), and clear it
-               if the user un-marks the book so it stops counting toward
-               the completion timeline in the stats view. */
-            r.completedDate = r.isRead ? (r.completedDate || new Date().getTime()) : null;
-        }).then(() => fetchLocalLibrary());
-    } else if (actionKey === 'backfillCompletionDate') {
-        migrateSingleBookCompletionDate(targetBookObj.id).then((wasUpdated) => {
-            if (wasUpdated) {
-                refreshLibraryAndVisibleStats();
-            } else {
-                alert("This book doesn't need a completion date backfill (already has one, or isn't marked read).");
-            }
-        });
-    } else if (actionKey === 'editCompletionDate') {
-        openCompletionDateModal(targetBookObj);
-    } else if (actionKey === 'clearCompletionDate') {
-        setBookCompletionDate(targetBookObj.id, null).then((wasUpdated) => {
-            if (wasUpdated) refreshLibraryAndVisibleStats();
-        });
-    } else if (actionKey === 'metadata' || actionKey === 'stats') {
-        openBookDiagnosticsModal(targetBookObj, actionKey);
-    } else if (actionKey === 'group') {
-        if (loadedGroupsMemory.length === 0) {
-            alert("No groups exist yet. Create one first with \"📁 New Group\".");
-            return;
-        }
-        const optionsList = loadedGroupsMemory
-            .map((g) => `${g.id}: ${g.name}`)
-            .join("\n");
-        const groupIdInput = prompt(
-            `Enter a group ID to move "${targetBookObj.title}" into, or leave blank to remove it from its group:\n\n${optionsList}`,
-        );
-        if (groupIdInput === null) return; // user cancelled
-        let newGroupId = null;
-        if (groupIdInput.trim() !== "") {
-            const parsed = parseInt(groupIdInput, 10);
-            const matchesRealGroup = loadedGroupsMemory.some((g) => g.id === parsed);
-            if (!matchesRealGroup) {
-                alert("That's not a valid group ID.");
+            }); break;
+        case "editStartDate":
+            openStartDateModal(targetBookObj); break;
+        case "editCompletionDate":
+            openCompletionDateModal(targetBookObj); break;
+        case "clearCompletionDate":
+            setBookCompletionDate(targetBookObj.id, null).then((wasUpdated) => {
+                if (wasUpdated) refreshLibraryAndVisibleStats();
+            }); break;
+        case "metadata":
+        case "stats":
+            openBookDiagnosticsModal(targetBookObj, actionKey); break;
+        case "group":
+            if (loadedGroupsMemory.length === 0) {
+                alert("No groups exist yet. Create one first with \"📁 New Group\".");
                 return;
             }
-            newGroupId = parsed;
-        }
-        updateBookRecord(targetBookObj.id, (r) => {
-            r.groupId = newGroupId;
-        }).then(() => fetchLocalLibrary());
+            const optionsList = loadedGroupsMemory
+                .map((g) => `${g.id}: ${g.name}`)
+                .join("\n");
+
+            const groupIdInput = prompt(
+                `Enter a group ID to move "${targetBookObj.title}" into, or leave blank to remove it from its group:\n\n${optionsList}`,
+            );
+            if (groupIdInput === null) return;
+            let newGroupId = null;
+            if (groupIdInput.trim() !== "") {
+                const parsed = parseInt(groupIdInput, 10);
+                const matchesRealGroup = loadedGroupsMemory.some((g) => g.id === parsed);
+                if (!matchesRealGroup) {
+                    alert("That's not a valid group ID.");
+                    return; }
+                newGroupId = parsed; }
+            updateBookRecord(targetBookObj.id, (r) => {
+                r.groupId = newGroupId;
+            }).then(() => fetchLocalLibrary()); break;
+        default:
+            console.warn(`Unknown context action: ${actionKey}`);
     }
 }
-
 /*
  Shared refresh path for completion-date actions (edit, clear, and estimate).
  Reloads loadedBooksMemory and refreshes the open stats view if needed, so
@@ -370,8 +362,49 @@ function refreshLibraryAndVisibleStats() {
 }
 
 // =================================================================
-// MANUAL COMPLETION DATE EDIT MODAL
+// MANUAL DATE EDIT MODAL
 // =================================================================
+
+function openStartDateModal(bookObj) {
+    const dialog = document.getElementById("start-date-modal");
+    const idField = document.getElementById("start-date-book-id");
+    const dateInput = document.getElementById("start-date-input");
+
+    idField.value = bookObj.id;
+    dateInput.value = bookObj.firstOpened
+        ? toDateInputValue(new Date(bookObj.firstOpened))
+        : "";
+
+    dialog.showModal();
+}
+
+function closeStartDateModal() {
+    document.getElementById("start-date-modal").close();
+}
+
+function submitStartDateModalForm() {
+    const bookId = parseInt(document.getElementById("start-date-book-id").value, 10);
+    const dateInput = document.getElementById("start-date-input");
+
+    if (!dateInput.value) {
+        alert("Pick a date first, or clear the start date manually.");
+        return;
+    }
+
+    const [year, month, day] = dateInput.value.split("-").map(Number);
+    const selectedDate = new Date(year, month - 1, day).getTime();
+
+    setBookStartDate(bookId, selectedDate).then((wasUpdated) => {
+        if (wasUpdated) {
+            closeStartDateModal();
+            refreshLibraryAndVisibleStats();
+        } else {
+            alert("Couldn't find that book to update.");
+        }
+    });
+}
+
+
 function openCompletionDateModal(bookObj) {
     const dialog = document.getElementById("completion-date-modal");
     const idField = document.getElementById("completion-date-book-id");
@@ -398,10 +431,6 @@ function submitCompletionDateModalForm() {
         return;
     }
 
-    /* new Date("YYYY-MM-DD") parses as UTC midnight, which can display as
-       the previous day in negative-UTC-offset timezones. Building the date
-       from its parts instead keeps it anchored to local midnight on the
-       day the user actually picked. */
     const [year, month, day] = dateInput.value.split("-").map(Number);
     const selectedDate = new Date(year, month - 1, day).getTime();
 
@@ -422,7 +451,6 @@ function toDateInputValue(dateObj) {
     const d = String(dateObj.getDate()).padStart(2, "0");
     return `${y}-${m}-${d}`;
 }
-
 // =================================================================
 // PER-BOOK DIAGNOSTICS DISPLAY PARSING ROUTINES
 // =================================================================

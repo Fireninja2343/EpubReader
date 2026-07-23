@@ -363,6 +363,11 @@ function setBookCompletionDate(bookId, completedDateValue) {
     record.completedDate = completedDateValue;
   }).then((record) => !!record);
 }
+function setBookStartDate(bookId, firstOpenedValue) {
+    return updateBookRecord(bookId, (record) => {
+        record.firstOpened = firstOpenedValue;
+    }).then((record) => !!record);
+}
 
 /*
  Called once per reader launch, where each visit counts as a new session.
