@@ -1,101 +1,16 @@
 // =================================================================
-// DRAG REORDERING DEPENDENCIES
-// =================================================================
-let draggedIndicesGroup = [];
-
-function handleCardDragStart(e) {
-  const currentBookId = Number(this.dataset.bookId);
-
-  if (!selectedBookIds.includes(currentBookId)) {
-    selectedBookIds = [currentBookId];
-
-    document.querySelectorAll(".book-card").forEach((c) => {
-      c.classList.toggle(
-        "selected",
-        Number(c.dataset.bookId) === currentBookId
-      );
-    });
-  }
-
-  draggedIndicesGroup = [...selectedBookIds];
-
-  draggedIndicesGroup.forEach((id) => {
-    const card = document.querySelector(
-      `.book-card[data-book-id='${id}']`
-    );
-    if (card) card.classList.add("dragging");
-  });
-
-  e.dataTransfer.setData("text/plain", "grouped-cards");
-}
-
-function handleCardDragEnd() {
-  document
-    .querySelectorAll(".book-card")
-    .forEach((c) => c.classList.remove("dragging"));
-}
-
-function handleCardDragOver(e) {
-  e.preventDefault();
-}
-
-function allowGridDrop(e) {
-  e.preventDefault();
-}
-
-function handleCardDrop(e) {
-  e.preventDefault();
-  e.stopPropagation();
-
-  const targetBookId = Number(this.dataset.bookId);
-
-  if (draggedIndicesGroup.includes(targetBookId)) return;
-
-  const itemsMoving = draggedIndicesGroup
-    .map(id => loadedBooksMemory.find(b => b.id === id))
-    .filter(Boolean);
-
-  let filteredLibrary = loadedBooksMemory.filter(
-    (b) => !draggedIndicesGroup.includes(b.id)
-  );
-
-  const targetBook = loadedBooksMemory.find(b => b.id === targetBookId);
-  let adjustedTargetIdx = filteredLibrary.indexOf(targetBook);
-
-  if (adjustedTargetIdx === -1) adjustedTargetIdx = filteredLibrary.length;
-
-  filteredLibrary.splice(adjustedTargetIdx, 0, ...itemsMoving);
-
-  //loadedBooksMemory = filteredLibrary;
-
-  const transaction = db.transaction([STORE_BOOKS], "readwrite");
-  const store = transaction.objectStore(STORE_BOOKS);
-
-  // IMPORTANT: use filteredLibrary (new order)
-  filteredLibrary.forEach((book, idx) => {
-    book.sortOrder = idx;
-    store.put(book);
-  });
-
-  transaction.oncomplete = () => {
-    loadedBooksMemory = filteredLibrary; // keep UI in sync
-    renderLibraryGrid();
-  };
-}
-
-// =================================================================
 // BACKUP: EXPORT / IMPORT ENTIRE LIBRARY AS JSON
 // =================================================================
 /*
  The backup file is deliberately a COMPLETE mirror of every local store
  plus the app's localStorage settings keys - not just books/groups - so it
  doubles as an offline-capable equivalent to Hard Pull/Hard Push (see
- 15-danger-zone.js): if there's no internet, or the user isn't signed in
+ 19-danger-zone.js): if there's no internet, or the user isn't signed in
  to cloud sync at all, this JSON file is the only way to move a full
  library (including notes and tags) between devices or recover from a
  wipe. Whenever a new synced data type is added to the app, it should be
  added here too, the same way it must be added to the Hard Pull/Push
- checklists in 15-danger-zone.js.
+ checklists in 19-danger-zone.js.
 */
 // =================================================================
 // BACKUP: EXPORT (preserves EPUB files, notes, tags, and settings)
@@ -134,7 +49,7 @@ async function exportLibraryToJSON() {
   );
 
   // Settings/preferences: the same localStorage-backed values mirrored to
-  // Firestore by pushNoteSettingsToCloud() in 11-firebase-sync.js, plus the
+  // Firestore by pushNoteSettingsToCloud() in 15-firebase-sync.js, plus the
   // reader/library interface config (theme, font, hidden buttons, etc.)
   // that's never synced to the cloud at all - so a local-only backup is
   // the only way to carry those settings across devices too.
@@ -247,8 +162,8 @@ function importLibraryFromJSON(event) {
         // localStorage settings - theme, font, hidden reader buttons, note
         // tag layout - are actually picked back up, since those are only
         // read once on page load (see loadSavedUserInterfaceSettings() in
-        // 07-reader-controls.js and the collapsedNoteTagKeys initializer in
-        // 12-notes.js).
+        // 10-reader-controls.js and the collapsedNoteTagKeys initializer in
+        // 16-notes.js).
         setTimeout(() => window.location.reload(), 600);
       };
       transaction.onerror = () => {
