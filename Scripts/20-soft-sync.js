@@ -1,58 +1,38 @@
 /*
  SOFT PULL / SOFT PUSH MODULE
- Interactive, review-before-you-commit counterparts to Hard Pull/Push
- (19-danger-zone.js). Where those are all-or-nothing, Soft Pull/Push:
+ Review-before-you-commit counterparts to Hard Pull/Push (19-danger-zone.js).
+ 1. Diff local vs. cloud for every synced type, without writing anything,
+    into a flat list of operations (addition/update/removal).
+ 2. Show them in a modal, grouped by category, with per-row status.
+ 3. Let the user apply a subset via the same push/pull/delete primitives
+    Hard Pull/Push and normal sync use.
+ 4. Support pause/cancel between operations (cooperative).
 
-   1. Compare local vs. cloud for every synced data type without writing
-      anything, producing a flat list of "operations" -
-      { type, category, id, label, apply() } - classified as an
-      addition/update/removal.
-   2. Show that list in a modal, grouped by category, with per-row status
-      (pending/running/done/error) and running counts.
-   3. Let the user run a subset (Apply All / Additions / Updates /
-      Removals) - each applies via the SAME per-item push/pull/delete
-      primitives Hard Pull/Push and normal incremental sync use, so the
-      write path never diverges.
-   4. Keep the modal open, update rows live, support pause/cancel between
-      operations (cooperative - never aborts one already in flight).
-
- EXTENSIBILITY: every data type participates through one entry in
- SYNC_TYPE_REGISTRY below. Adding a new type means adding one registry
- entry - the comparison engine, renderer, and apply-queue runner are
- generic over the registry.
+ New data types just need one entry in SYNC_TYPE_REGISTRY below.
 */
 
-// SYNC TYPE REGISTRY - each entry describes one synced data type
-// end-to-end (read local/remote, diff, apply). Single place to add a
-// new data type.
+/*
+ SYNC TYPE REGISTRY - each entry describes one synced data type
+ end-to-end (read local/remote, diff, apply).
 
-// Shared fetchRemote() shape: read every doc in a Firestore collection,
-// tag each with its numeric id.
+ Shared fetchRemote() shape: read every doc in a Firestore collection,
+ tag each with its numeric id.
+*/
 async function fetchRemoteCollection(collectionFn) {
   const snap = await collectionFn().get();
   return snap.docs.map((d) => ({ id: Number(d.id), ...d.data() }));
 }
 
 /*
- DEEP VALUE EQUALITY + FIELD-LEVEL DIFFING
-
- ROOT CAUSE (false-positive "0/1 Updates" right after a Hard Push): the
- old comparison JSON.stringify()'d array/object fields before comparing.
- Firestore does NOT guarantee a map field's key order survives a write ->
- read round trip (documented behavior - see firebase/flutterfire#3232), so
- a book with real readingSessions/readingHistory entries could read back
- with the same values in a different key order and get flagged as changed
- purely because stringify bakes in enumeration order.
-
- Fix: never stringify-then-compare. deepValuesEqual() looks values up by
- key (order-independent for objects/maps) and only cares about array
- *element* order, which is correct since every array field in this
- registry is either an ordered log or pre-sorted by fieldsToCompare().
+ DEEP VALUE EQUALITY. Old code JSON.stringify()'d arrays/objects before
+ comparing, but Firestore doesn't guarantee map key order survives a
+ write/read round trip, so identical data could come back reordered and
+ get flagged as a false "update". Compare structurally instead: object
+ keys are looked up by name (order-independent), only array element
+ order matters.
 */
 function deepValuesEqual(a, b) {
   if (a === b) return true;
-  // Treat null/undefined/missing as the same "empty" value - defensive
-  // second layer; fieldsToCompare() already normalizes most of these.
   if (a === null || a === undefined || b === null || b === undefined) {
     return (a === null || a === undefined) && (b === null || b === undefined);
   }
@@ -65,27 +45,19 @@ function deepValuesEqual(a, b) {
     return true;
   }
   if (typeof a === "object" && typeof b === "object") {
-    // Keys looked up by name, never enumerated into a string - this is
-    // what makes Firestore's unordered map keys a non-issue here.
     const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
     for (const key of keys) {
       if (!deepValuesEqual(a[key], b[key])) return false;
     }
     return true;
   }
-  return false; // primitives of different value already failed === above
+  return false;
 }
 
-/*
- Computes every field that differs between two fieldsToCompare() outputs,
- via deepValuesEqual() rather than JSON.stringify + string compare (see
- ROOT CAUSE above). Returns diff rows for both the equality check (empty
- = equal) and the expandable diff UI (non-empty = what to show).
-
- fieldMeta is the optional { [fieldKey]: { group, label, format } }
- companion object each registry entry can provide (see "Entry shape"
- below) - any key left out defaults sensibly.
-*/
+// Every field that differs between two fieldsToCompare() outputs, via
+// deepValuesEqual(). Empty result = equal; non-empty = diff UI rows.
+// fieldMeta is the optional per-field { group, label, format } (see
+// "Entry shape" below); missing keys get sensible defaults.
 function computeFieldDiffs(localFields, remoteFields, fieldMeta = {}) {
   const keys = new Set([...Object.keys(localFields), ...Object.keys(remoteFields)]);
   const diffs = [];
@@ -105,21 +77,13 @@ function computeFieldDiffs(localFields, remoteFields, fieldMeta = {}) {
       remoteDisplay: formatter(remoteValue),
     });
   }
-  // Stable order (insertion order isn't guaranteed from a merged Set) -
-  // sort by group then key so the renderer can start a new group section
-  // whenever `group` changes while walking the list.
+  // Sort group-then-key for a stable order the renderer can walk.
   diffs.sort((a, b) => (a.group === b.group ? a.key.localeCompare(b.key) : a.group.localeCompare(b.group)));
   return diffs;
 }
 
-/*
- Additions/removals only have one side's data, but every reported
- difference should still be inspectable - an addition is "this whole
- record is new," worth expanding to see, not just a title. Reuses the
- same fieldMeta grouping/labels/formatters as computeFieldDiffs() so an
- addition/removal panel looks identical to an update panel, just with
- only one column populated.
-*/
+// One-sided version for additions/removals (only one side has data), so
+// they're still expandable like an update panel, just one column filled.
 function buildOneSidedFieldSnapshot(fields, fieldMeta = {}, side) {
   const rows = [];
   for (const key of Object.keys(fields)) {
@@ -140,15 +104,14 @@ function buildOneSidedFieldSnapshot(fields, fieldMeta = {}, side) {
   return rows;
 }
 
-// camelCase field key -> "Camel Case" fallback label, used only when a
-// registry entry's fieldMeta doesn't specify an explicit label.
+// camelCase -> "Camel Case" fallback label when fieldMeta omits one.
 function defaultFieldLabel(key) {
   return key
     .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
     .replace(/^./, (c) => c.toUpperCase());
 }
 
-// VALUE FORMATTERS (for the expandable diff UI)
+// VALUE FORMATTERS for the expandable diff UI
 function defaultFormatFieldValue(value) {
   if (value === null || value === undefined || value === "") return "—";
   if (typeof value === "boolean") return value ? "Yes" : "No";
@@ -157,9 +120,6 @@ function defaultFormatFieldValue(value) {
   return truncateForDiff(String(value));
 }
 
-// Epoch-ms timestamp -> locale date/time string. Every date-ish field
-// here is stored as a plain number, never a Firestore Timestamp object,
-// so this is pure formatting, no Timestamp-vs-number normalization needed.
 function formatDiffDate(value) {
   if (value === null || value === undefined) return "—";
   const d = new Date(value);
@@ -176,9 +136,7 @@ function formatDiffDuration(seconds) {
   return [h ? `${h}h` : null, m ? `${m}m` : null, `${sec}s`].filter(Boolean).join(" ");
 }
 
-// Summarizes an append-ordered log array (readingSessions/readingHistory)
-// as a count rather than raw JSON, which would be unreadable for a book
-// with hundreds of sessions.
+// Log arrays (readingSessions/readingHistory) show as a count, not raw JSON.
 function formatDiffLogArray(noun) {
   return (value) => {
     const arr = Array.isArray(value) ? value : [];
@@ -186,8 +144,7 @@ function formatDiffLogArray(noun) {
   };
 }
 
-// Long strings (base64 covers, long note text) are truncated for
-// display - shows that a change happened, not a full reproduction.
+// Long strings (covers, note text) truncated for display.
 function truncateForDiff(str, max = 120) {
   if (typeof str !== "string") return str;
   return str.length > max ? str.slice(0, max) + "…" : str;
@@ -195,35 +152,22 @@ function truncateForDiff(str, max = 120) {
 
 /*
  Entry shape:
-   key/label/icon      - id, display name, group-header emoji
-   fetchLocal()        -> Promise<local records (each needs an `id`)>.
-                         Reads IndexedDB directly, not an in-memory
-                         cache, since caches aren't guaranteed populated
-                         yet when this runs.
-   fetchRemote()       -> Promise<remote records (each needs an `id`)>
-   describe(rec)       -> short human label for one record
-   fieldsToCompare(rec) -> just the fields that matter for equality, so a
-                         differing lastModified alone doesn't get flagged.
-                         Return actual values (arrays/objects as-is), not
-                         pre-serialized - computeFieldDiffs() compares
-                         structurally, so stringifying here would
-                         reintroduce the key-order bug above.
-   fieldMeta            -> optional { [fieldKey]: { group, label, format } },
-                         used only for the expandable diff UI. Any field
-                         left out gets a sensible default.
-   applyAddition(record)      -> Promise, create the missing side
-   applyUpdate(local, remote) -> Promise, overwrite one side with the other
-   applyRemoval(id)           -> Promise, delete from the side that has it
- Soft Pull and Soft Push reuse the same registry; only the direction
- (which side is "source of truth") differs - see buildSyncPlan() below.
+   key/label/icon       - id, display name, group-header emoji
+   fetchLocal()         -> local records (each needs `id`); reads IndexedDB
+                          directly, not an in-memory cache
+   fetchRemote()        -> remote records (each needs `id`)
+   describe(rec)        -> short human label
+   fieldsToCompare(rec) -> fields that matter for equality, as real
+                          values (not pre-serialized)
+   fieldMeta            -> optional { [key]: { group, label, format } }
+   applyAddition/applyUpdate/applyRemoval -> Promise-returning appliers
+ Soft Pull and Soft Push share this registry; only direction differs.
 */
 const SYNC_TYPE_REGISTRY = [
   {
     key: "books",
     label: "Books",
     icon: "📚",
-    // Reads IndexedDB directly rather than trusting loadedBooksMemory -
-    // see "Entry shape" comment above.
     fetchLocal: () => getAllFromLocalStore(STORE_BOOKS),
     fetchRemote: () => fetchRemoteCollection(booksCollection),
     describe: (rec) => rec.title || `Book #${rec.id}`,
@@ -244,19 +188,11 @@ const SYNC_TYPE_REGISTRY = [
       lastOpened: rec.lastOpened ?? null,
       completedDate: rec.completedDate ?? null,
       totalSessions: rec.totalSessions ?? 0,
-      // Passed as real arrays, NOT stringified - see deepValuesEqual()
-      // comment above: Firestore doesn't guarantee map-key order, so a
-      // genuinely-read book could round-trip with the same session data
-      // in a different key order and get wrongly flagged as changed.
-      // Array *element* order (append-ordered logs) still matters.
       readingSessions: rec.readingSessions ?? [],
       readingHistory: rec.readingHistory ?? [],
-      // File-upload completeness signal: metadata can match perfectly on
-      // both sides even when the EPUB binary upload was interrupted
-      // mid-pushBookFileToCloud() - chunkCount is only written as that
-      // function's last step. Without this field an interrupted upload
-      // would show as "already in sync". Local reports "do I have file
-      // data at all"; remote reports "does chunkCount look complete".
+      // chunkCount is only set once pushBookFileToCloud() fully finishes,
+      // so this catches an interrupted EPUB upload that metadata alone
+      // would miss.
       hasUsableFile: rec.fileData !== undefined ? !!rec.fileData : !!rec.chunkCount,
     }),
     fieldMeta: {
@@ -282,11 +218,8 @@ const SYNC_TYPE_REGISTRY = [
     },
     applyAddition: async (record, direction) => {
       if (direction === "pull") {
-        // downloadBookFromCloud() writes the local record and pulls the
-        // chunked file binary, but swallows its own errors (silent no-op
-        // if chunkCount is missing / a chunk isn't done uploading) rather
-        // than throwing - so success is verified by checking the local
-        // store afterward, not by trusting a resolved promise.
+        // downloadBookFromCloud() swallows its own errors, so verify by
+        // checking the local store rather than trusting the promise.
         await downloadBookFromCloud(record.id, record);
         const wasWritten = await new Promise((resolve, reject) => {
           const tx = db.transaction([STORE_BOOKS], "readonly");
@@ -307,11 +240,8 @@ const SYNC_TYPE_REGISTRY = [
         await applyRemoteBookUpdate(localRec.id, remoteRec);
       } else {
         await pushBookMetadataToCloud(localRec);
-        // If this update was (partly) triggered by hasUsableFile looking
-        // incomplete, pushing metadata alone won't fix it - chunkCount
-        // only gets set by re-running pushBookFileToCloud(). Re-checking
-        // here instead of always re-uploading keeps a plain rename from
-        // re-uploading the whole EPUB for no reason.
+        // Re-upload the file only if chunkCount looks incomplete, so a
+        // plain rename doesn't re-push the whole EPUB.
         if (!remoteRec.chunkCount && localRec.fileData) {
           await pushBookFileToCloud(localRec);
         }
@@ -372,8 +302,6 @@ const SYNC_TYPE_REGISTRY = [
     fieldsToCompare: (rec) => ({
       selectedText: rec.selectedText ?? "",
       comment: rec.comment ?? "",
-      // Sorted (order isn't meaningful), no longer stringified - the
-      // comparison engine now compares arrays directly.
       tagIds: (rec.tagIds ?? []).slice().sort((a, b) => a - b),
       bookId: rec.bookId ?? null,
       bookTitle: rec.bookTitle ?? null,
@@ -448,16 +376,13 @@ const SYNC_TYPE_REGISTRY = [
     key: "settings",
     label: "Settings / Preferences",
     icon: "⚙️",
-    // Settings are a singleton bundle, not a keyed collection - this
-    // entry always yields zero or one "record" (id "settings"), treated
-    // as one row rather than diffed field-by-field, since these values
-    // are already pushed/pulled as one atomic bundle elsewhere.
+    // Singleton bundle (id "settings"), not a keyed collection - treated
+    // as one row rather than diffed field-by-field.
     fetchLocal: () => {
       const rawCollapsed = localStorage.getItem(Config.Db.COLLAPSED_NOTE_TAG_KEYS_STORAGE_KEY);
       const rawLastUsed = localStorage.getItem(Config.Db.LAST_NOTE_TAGS_STORAGE_KEY);
-      // Mirrors fetchRemote()'s "no bundle at all -> []" shape: if neither
-      // key was ever written, there's no local record to compare, not an
-      // empty one - otherwise a fresh device would spuriously show a removal.
+      // No keys written yet = no record to compare (not an empty one),
+      // else a fresh device would show a spurious removal.
       if (rawCollapsed === null && rawLastUsed === null) return [];
       return [
         {
@@ -482,7 +407,6 @@ const SYNC_TYPE_REGISTRY = [
     },
     describe: () => "Notes page layout & tag preferences",
     fieldsToCompare: (rec) => ({
-      // Sorted, no longer stringified - same reasoning as Notes' tagIds above.
       collapsedNoteTagKeys: (rec.collapsedNoteTagKeys ?? []).slice().sort(),
       lastUsedNoteTagIds: (rec.lastUsedNoteTagIds ?? []).slice().sort(),
     }),
@@ -508,17 +432,13 @@ const SYNC_TYPE_REGISTRY = [
         await pushNoteSettingsToCloudForced();
       }
     },
-    // Settings is a singleton, never meaningful to delete outright. This
-    // branch is only reached when one side never synced settings yet -
-    // the safe action is to do nothing (the Addition on the other side,
-    // generated separately, is what brings the two sides in line).
+    // Never meaningfully deleted; only reached when one side hasn't
+    // synced yet, so no-op (the paired Addition brings sides in line).
     applyRemoval: async () => {},
   },
 ];
 
-// SMALL LOCAL-DB HELPERS (generic put/delete, reused across registry
-// entries instead of each one opening its own transaction).
-// getAllFromLocalStore() lives in 10-utils.js and is shared as-is.
+// SMALL LOCAL-DB HELPERS, shared across registry entries.
 function putLocalRecord(storeName, record) {
   return new Promise((resolve, reject) => {
     const tx = db.transaction([storeName], "readwrite");
@@ -537,9 +457,7 @@ function deleteLocalRecord(storeName, id) {
   });
 }
 
-// Books need their own removal helper (not the generic one above)
-// because deleting a book locally should also clear it from in-memory
-// selection state, matching the rest of the app's book-removal behavior.
+// Own helper (not the generic one) so it also clears in-memory selection state.
 function deleteBookLocallyOnly(id) {
   return new Promise((resolve, reject) => {
     const tx = db.transaction([STORE_BOOKS], "readwrite");
@@ -549,9 +467,7 @@ function deleteBookLocallyOnly(id) {
   });
 }
 
-// Remote note docs don't carry dateCreated like a fresh local note would
-// - normalized the same way pullInitialSyncFromCloud() already does in
-// 11-firebase-sync.js.
+// Matches the normalization pullInitialSyncFromCloud() does in 11-firebase-sync.js.
 function normalizeRemoteNote(remote) {
   return {
     id: remote.id,
@@ -564,22 +480,12 @@ function normalizeRemoteNote(remote) {
   };
 }
 
-// COMPARISON ENGINE - pure: reads local memory + read-only cloud
-// fetches, never writes. Produces a flat, ordered list of "operations".
+// COMPARISON ENGINE - pure (read-only), produces a flat operations list.
 /*
- One operation:
-   {
-     opId,                  // stable string id for this row, e.g. "books:add:42"
-     typeKey, typeLabel, typeIcon,
-     category: "addition" | "update" | "removal",
-     label,                 // human-readable description of the record
-     status: "pending" | "running" | "done" | "error",
-     errorMessage,          // set only if status === "error"
-     run: async () => void, // performs this one operation
-   }
- direction: "pull" (cloud -> local) or "push" (local -> cloud). Determines
- which side is authoritative for additions/updates and which side
- removals delete from - see each registry entry's applyX(..., direction).
+ One operation: { opId, typeKey, typeLabel, typeIcon, category,
+ label, status, errorMessage, run }.
+ direction: "pull" (cloud -> local) or "push" (local -> cloud) - decides
+ which side is source for additions/updates and which removals delete from.
 */
 async function buildSyncPlan(direction) {
   const operations = [];
@@ -595,13 +501,6 @@ async function buildSyncPlan(direction) {
     for (const id of allIds) {
       const localRec = localById.get(id);
       const remoteRec = remoteById.get(id);
-
-      // Direction determines the "source" (drives additions/updates) and
-      // which side removals delete from:
-      //   pull: cloud is source. Missing locally -> addition. Local-only
-      //         -> removal (delete locally).
-      //   push: local is source. Missing on cloud -> addition. Remote-only
-      //         -> removal (delete from cloud).
       const sourceHas = direction === "pull" ? !!remoteRec : !!localRec;
       const destHas = direction === "pull" ? !!localRec : !!remoteRec;
 
@@ -654,8 +553,6 @@ async function buildSyncPlan(direction) {
           });
         }
       }
-      // !sourceHas && !destHas is impossible (id came from the union of
-      // both maps); the remaining case (equal, no diff) produces nothing.
     }
   }
 
@@ -665,16 +562,8 @@ async function buildSyncPlan(direction) {
 // MODAL STATE + LIFECYCLE
 let softSyncState = null;
 /*
- softSyncState shape while a modal is open:
-   {
-     direction: "pull" | "push",
-     operations: [ ...see above... ],
-     runState: "idle" | "running" | "paused",
-     cancelRequested: boolean,
-     pauseRequested: boolean,
-     activeFilter: "all" | "addition" | "update" | "removal", // which Apply button is driving the current run
-     expandedOpIds: Set<opId>, // which rows currently have their field-diff panel open
-   }
+ { direction: "pull"|"push", operations, runState: "idle"|"running"|"paused",
+   cancelRequested, pauseRequested, activeFilter, expandedOpIds: Set }
 */
 
 function promptSoftPull() {
@@ -721,8 +610,7 @@ async function openSoftSyncModal(direction) {
 
   try {
     const operations = await buildSyncPlan(direction);
-    // A concurrent close shouldn't resurrect a stale plan into a modal
-    // that's no longer showing this run.
+    // Don't resurrect a stale plan if the modal moved on while we awaited.
     if (!softSyncState || softSyncState.direction !== direction) return;
     softSyncState.operations = operations;
     renderSoftSyncModal();
@@ -737,9 +625,7 @@ async function openSoftSyncModal(direction) {
 function closeSoftSyncModal() {
   const modal = document.getElementById("soft-sync-modal");
   if (softSyncState && softSyncState.runState === "running") {
-    // Closing mid-run is treated as a cancel request rather than a block
-    // - the in-flight operation still finishes (cooperative cancellation,
-    // see runSoftSyncQueue()), it just won't start the next one.
+    // Cooperative cancel: in-flight op finishes, next one won't start.
     softSyncState.cancelRequested = true;
   }
   modal.close();
@@ -754,19 +640,13 @@ function setSoftSyncZoneButtonsDisabled(isDisabled) {
 }
 
 // APPLY QUEUE RUNNER
-/*
- filterCategory: null ("Apply All") or "addition"/"update"/"removal" to
- restrict this run to one category. Only touches "pending"/"error" ops,
- so a completed row is never re-applied and a failed row can be retried
- by pressing the same Apply button again.
-*/
+// filterCategory: null (all) or one category. Only touches
+// pending/error ops, so completed rows are never re-applied.
 async function runSoftSyncQueue(filterCategory) {
   if (!softSyncState || softSyncState.runState === "running") return;
 
-  // Held as a local reference for this run's lifetime: closeSoftSyncModal()
-  // nulls the module-level softSyncState on close, which would otherwise
-  // throw on the next loop iteration if the modal closes mid-run. Comparing
-  // against this snapshot lets the loop notice and stop cleanly.
+  // Snapshot reference: softSyncState may be nulled by closeSoftSyncModal()
+  // mid-run; compare against this to detect that and stop cleanly.
   const runState = softSyncState;
 
   runState.runState = "running";
@@ -782,8 +662,7 @@ async function runSoftSyncQueue(filterCategory) {
   for (const op of queue) {
     if (softSyncState !== runState || runState.cancelRequested) break;
 
-    // Cooperative pause: wait here (between operations only, never mid-
-    // operation) until resumed or cancelled, without blocking the page.
+    // Cooperative pause: only wait between ops, never mid-operation.
     while (runState.pauseRequested && !runState.cancelRequested && softSyncState === runState) {
       runState.runState = "paused";
       renderSoftSyncControls();
@@ -808,17 +687,13 @@ async function runSoftSyncQueue(filterCategory) {
     renderSoftSyncSummaryCounts();
   }
 
-  // If the modal was closed mid-run, softSyncState is already null (or a
-  // newer run) - nothing left to finalize or re-render.
   if (softSyncState !== runState) return;
 
   runState.runState = "idle";
   runState.activeFilter = null;
   renderSoftSyncControls();
 
-  // Refresh caches other views read from, so the rest of the app
-  // (library grid, notes page, stats) reflects this run's changes
-  // without needing the modal closed first.
+  // Refresh other views so they reflect this run's changes immediately.
   fetchLocalLibrary();
   if (typeof fetchNotesLibrary === "function") fetchNotesLibrary();
 }
@@ -830,10 +705,8 @@ function pauseSoftSyncQueue() {
 }
 
 function resumeSoftSyncQueue() {
-  // Guards on pauseRequested, not runState === "paused": the loop only
-  // flips runState to "paused" on its next poll tick, so a fast
-  // Pause-then-Resume could land while runState still reads "running"
-  // and silently no-op, leaving pauseRequested stuck true.
+  // Guard on pauseRequested, not runState, since runState only flips to
+  // "paused" on the loop's next poll tick.
   if (!softSyncState || !softSyncState.pauseRequested) return;
   softSyncState.pauseRequested = false;
   softSyncState.runState = "running";
@@ -907,9 +780,7 @@ function renderSoftSyncOperationList() {
     return;
   }
 
-  // Grouped by data type first (registry order, so books lead), then by
-  // category within each type, so related changes to the same
-  // book/note/etc. sit together instead of scattered by category.
+  // Grouped by type (registry order), then category within each type.
   const byType = new Map();
   for (const op of softSyncState.operations) {
     if (!byType.has(op.typeKey)) byType.set(op.typeKey, []);
@@ -932,20 +803,13 @@ function renderSoftSyncOperationList() {
   container.innerHTML = sections.join("");
 }
 
-/*
- Every row with something to show (any addition/update/removal) is
- expandable: clicking toggles a field-by-field diff panel underneath.
- The outer wrapper carries the stable id renderSoftSyncOperationRow()
- targets, so toggling one row re-renders just that row.
-*/
+// Every row with a diff is expandable; clicking toggles the field panel.
 function renderOperationRowHtml(op) {
   const cat = categoryMeta(op.category);
   const st = statusMeta(op.status);
   const hasDiffs = Array.isArray(op.fieldDiffs) && op.fieldDiffs.length > 0;
   const isExpanded = hasDiffs && !!(softSyncState && softSyncState.expandedOpIds.has(op.opId));
-  // JSON.stringify() rather than manual quote-escaping, to safely embed
-  // opId as a JS string literal inside an inline event-handler attribute.
-  const opIdJsLiteral = JSON.stringify(op.opId);
+  const opIdJsLiteral = JSON.stringify(op.opId); // safe JS string literal for the inline handler
   return `
     <div class="soft-sync-op-wrapper${isExpanded ? " soft-sync-op-expanded" : ""}" id="soft-sync-row-${cssEscapeId(op.opId)}">
       <div
@@ -965,8 +829,7 @@ function renderOperationRowHtml(op) {
   `;
 }
 
-// Toggles one row's expand state and re-renders just that row, so
-// expanding one book's diff doesn't scroll-jump a long review list.
+// Re-renders just this row so expanding one diff doesn't scroll-jump the list.
 function toggleSoftSyncOpDetails(opId) {
   if (!softSyncState) return;
   if (softSyncState.expandedOpIds.has(opId)) {
@@ -978,24 +841,12 @@ function toggleSoftSyncOpDetails(opId) {
   if (op) renderSoftSyncOperationRow(op);
 }
 
-// direction: "pull" (Cloud -> Local) or "push" (Local -> Cloud). Applies
-// uniformly to every row in a run, since direction is a property of the
-// whole run, not an individual field.
 function directionColumnLabels(direction) {
   return direction === "pull" ? ["Cloud", "Local"] : ["Local", "Cloud"];
 }
 
-/*
- Renders the expandable field-by-field diff panel for one operation.
- Groups fieldDiffs by `group` (Metadata, Reading Progress, Statistics,
- etc.) - fieldDiffs is already sorted group-then-key by
- computeFieldDiffs()/buildOneSidedFieldSnapshot(), so a new group heading
- is emitted exactly when the group changes, no separate grouping pass.
-
- Updates show both sides (one value "flowing" into the other, in the
- run's direction); additions/removals are one-sided (the other side
- renders as "—") - same panel shape either way.
-*/
+// Expandable field-by-field diff panel. fieldDiffs is pre-sorted
+// group-then-key, so a new heading is emitted exactly when group changes.
 function renderOpDetailPanelHtml(op) {
   if (!op.fieldDiffs || op.fieldDiffs.length === 0) return "";
   const direction = softSyncState ? softSyncState.direction : "push";
@@ -1036,17 +887,13 @@ function renderOpDetailPanelHtml(op) {
   `;
 }
 
-// Re-renders just one row (+ detail panel, if expanded) in place - used
-// both during a live run (avoids re-rendering/scroll-jumping the whole
-// list on every completion) and on expand/collapse toggle.
 function renderSoftSyncOperationRow(op) {
   const rowEl = document.getElementById(`soft-sync-row-${cssEscapeId(op.opId)}`);
   if (!rowEl) return;
   rowEl.outerHTML = renderOperationRowHtml(op);
 }
 
-// IDs can contain characters (colons) unsafe unescaped inside a CSS id
-// selector - defensive minimum, not a full solution.
+// Escapes characters unsafe in a raw CSS id selector.
 function cssEscapeId(id) {
   return String(id).replace(/[^a-zA-Z0-9_-]/g, "_");
 }
@@ -1063,10 +910,8 @@ function renderSoftSyncControls() {
 
   if (!softSyncState) return;
 
-  // Driven off pauseRequested directly (not just runState) so Pause
-  // flips the UI instantly - the polling loop in runSoftSyncQueue() only
-  // updates runState on its next ~200ms tick, which would make Pause
-  // feel laggy otherwise.
+  // pauseRequested (not just runState) drives isPaused so Pause feels
+  // instant instead of waiting for the loop's next ~200ms tick.
   const isPaused = softSyncState.runState === "paused" || (softSyncState.runState === "running" && softSyncState.pauseRequested);
   const isRunning = softSyncState.runState === "running" && !softSyncState.pauseRequested;
   const isBusy = isRunning || isPaused;
