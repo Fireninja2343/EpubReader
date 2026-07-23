@@ -455,7 +455,7 @@ function renderTimelineModeGantt(container, data) {
         container.innerHTML = `<div class="empty-state-message">No books started yet.</div>`;
         return;
     }
-
+    
     const globalStart = Math.min(...entries.map((e) => e.startMs));
     const globalEnd = Math.max(...entries.map((e) => e.endMs));
     // Floor of one day's worth of ms avoids a division by ~0 when every
@@ -698,24 +698,27 @@ function buildGanttActivityGradient(entry) {
     if (secondsValues.length === 0) return "";
     const maxSeconds = Math.max(...secondsValues);
 
-    const stops = Object.keys(daySeconds).sort().map((dayKey) => {
-        // Rebuilt from y/m/d parts (rather than `new Date(dayKey)`, which
-        // parses "YYYY-MM-DD" as UTC midnight in most browsers) so this
-        // stays in the same local-time frame formatLocalDateKey() used to
-        // produce the key in the first place - avoids an off-by-one-day
-        // shift for timezones behind UTC.
-        const [y, m, d] = dayKey.split("-").map(Number);
-        const dayMs = new Date(y, m - 1, d).getTime();
-        const posPct = Math.max(0, Math.min(100, ((dayMs - entry.startMs) / spanMs) * 100));
-        // Opacity floor of 0.35 keeps even the lightest reading day visibly
-        // part of the bar, rather than fading all the way to invisible.
-        const opacity = 0.35 + 0.65 * (daySeconds[dayKey] / maxSeconds);
-        return `rgba(255,255,255,${opacity.toFixed(2)}) ${posPct.toFixed(1)}%`;
-    });
+    const stops = [];
 
-    // mix-blend-mode:overlay (see .gantt-bar in styles.css) lets this
-    // lightness gradient modulate the solid tint underneath rather than
-    // painting flat white over it.
+    const startDate = new Date(entry.startMs);
+    startDate.setHours(0, 0, 0, 0);
+
+    const endDate = new Date(entry.endMs);
+    endDate.setHours(0, 0, 0, 0);
+
+    for (
+        let date = new Date(startDate);
+        date <= endDate;
+        date.setDate(date.getDate() + 1)
+    ) {
+        const dayKey = formatLocalDateKey(date);
+        const dayMs = date.getTime();
+        const posPct = Math.max(0,Math.min(100, ((dayMs - entry.startMs) / spanMs) * 100));
+        const seconds = daySeconds[dayKey] || 0;
+        const opacity = seconds > 0 ? 0.35 + 0.65 * (seconds / maxSeconds): 0.05; // No reading = minimum opacity
+        stops.push(`rgba(255,255,255,${opacity.toFixed(2)}) ${posPct.toFixed(1)}%`);
+    }
+
     return `background-image:linear-gradient(to right, ${stops.join(", ")});`;
 }
 
