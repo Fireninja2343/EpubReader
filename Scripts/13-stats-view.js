@@ -34,11 +34,10 @@ function computeStatAveragesForGroup(groupMetrics) {
  same status. The averaging logic stays generic.
 */
 const DELTA_COMPARISON_STATUSES = [
-    READING_STATUS.COMPLETED,
-    READING_STATUS.IN_PROGRESS,
-    READING_STATUS.PAUSED,
+    Config.Miscellaneous.READING_STATUS.COMPLETED,
+    Config.Miscellaneous.READING_STATUS.IN_PROGRESS,
+    Config.Miscellaneous.READING_STATUS.PAUSED,
 ];
-
 /*
  Computes separate averages/cutoffs for each status in
  DELTA_COMPARISON_STATUSES, so books are compared only against others with

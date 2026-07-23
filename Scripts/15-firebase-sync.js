@@ -16,7 +16,6 @@
    another device's changes won't appear here until reload/re-sign-in.
 */
 
-// Reuses the config already in 00-config.js rather than a second copy that could drift.
 firebase.initializeApp(Config.firebaseConfig);
 const fbAuth = firebase.auth();
 const fbDb = firebase.firestore();

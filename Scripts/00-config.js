@@ -47,5 +47,11 @@ const Config = {
   },
   Miscellaneous: {
     DEFAULT_GROUP_COLOR: '#252538',
+    READING_STATUS: {
+      COMPLETED: "completed",
+      IN_PROGRESS: "inProgress",
+      PAUSED: "paused",
+      NOT_STARTED: "notStarted",
+    }
   }
 };

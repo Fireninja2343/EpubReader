@@ -9,13 +9,7 @@
  paused means activity exists but is older than the inactivity threshold;
  inProgress means recent activity exists and the book is not completed.
 */
-const READING_STATUS = {
-    COMPLETED: "completed",
-    IN_PROGRESS: "inProgress",
-    PAUSED: "paused",
-    NOT_STARTED: "notStarted",
-};
-
+const READING_STATUS = Config.Miscellaneous.READING_STATUS;
 // Single source for status emoji/label pairing.
 const READING_STATUS_LABELS = {
     [READING_STATUS.COMPLETED]: "✅ Completed",
