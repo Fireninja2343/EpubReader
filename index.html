@@ -498,6 +498,28 @@
             </div>
         </div>
     </dialog>
+    <dialog id="completion-date-modal" class="custom-modal">
+        <div class="modal-content">
+            <h3>Edit Completion Date</h3>
+            <hr class="hr-divider-spaced" />
+
+            <input type="hidden" id="completion-date-book-id">
+
+            <div class="control-item">
+                <label>Completion Date</label>
+                <input type="date" id="completion-date-input" class="full-width-input">
+            </div>
+
+            <div class="modal-actions">
+                <button onclick="document.getElementById('completion-date-modal').close()" class="btn-ghost">
+                    Cancel
+                </button>
+                <button onclick="submitCompletionDateModal()" class="btn-accent">
+                    Save
+                </button>
+            </div>
+        </div>
+    </dialog>
 
     <div id="book-context-menu">
         <div class="context-item-row" onclick="triggerContextAction('metadata')">📋 View Metadata</div>
