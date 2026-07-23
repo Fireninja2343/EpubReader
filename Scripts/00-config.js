@@ -21,20 +21,17 @@ const Config = {
     CLOUD_PROGRESS_PUSH_INTERVAL_MS: 20000,
     IDLE_THRESHOLD_MS: 20000,
     FORCE_PUSH_MIN_GAP_MS : 2000,
+    PUSH_RETRY_IMMEDIATE_ATTEMPTS: 2,
+    PUSH_RETRY_IMMEDIATE_DELAY_MS: 1500,
+    PUSH_RETRY_QUEUE_DRAIN_INTERVAL_MS: 30000,
   },
   Reading: {
     SESSION_INACTIVITY_TIMEOUT_MS: 5 * 60 * 1000, //mins * 60(from min->s) * 1000(from s->ms)
-  //Cap on how many past sessions are kept per book, so readingSessions doesn't grow unbounded for books re-opened hundreds of times.
     MAX_STORED_SESSIONS_PER_BOOK: 50,
-  //Cap on how many raw readingHistory entries (see 13-reading-history.js) are kept per book.
-  //One entry is written per uninterrupted reading session, so
-  //365 comfortably covers 1 year of daily reading before the oldest entries start rolling off.
     MAX_STORED_HISTORY_ENTRIES_PER_BOOK: 365,
-/* How long a book can go without any real recorded reading activity
-   (see getBookReadingStatus() in 10-utils.js) before it's considered
-   "Paused" rather than "In Progress" */
     PAUSED_INACTIVITY_THRESHOLD_MS: 7 * 24 * 60 * 60 * 1000, // Days (*24 -> h *60 -> min *60 -> s *1000 ->ms)
     MIN_MEANINGFUL_TRACKED_SECONDS: 30,
+    TRACKING_TICK_MS: 2000,
   },
   firebaseConfig: {
     apiKey: "AIzaSyB-lHa5mHi-iMdgGaTe5ehFZE1Xf2T8TkQ",
@@ -52,6 +49,38 @@ const Config = {
       IN_PROGRESS: "inProgress",
       PAUSED: "paused",
       NOT_STARTED: "notStarted",
-    }
-  }
+    },
+    READER_BUTTON_ELEMENT_MAP: {
+      toc: "btn-toggle-toc",
+      prev: "btn-prev-chapter",
+      next: "btn-next-chapter",
+      stats: "btn-global-stats",
+      notes: "btn-global-notes",
+      themes: "theme-selector",
+      sort: "sort-selector",
+      viewMode: "library-view-mode",
+      openSelected: "btn-open-book",
+      lastRead: "btn-last-read",
+      hardReload: "btn-hard-reload",
+      clearLocalData: "btn-clear-local-data",
+      hardPull: "btn-hard-pull",
+      hardPush: "btn-hard-push",
+      softPull: "btn-soft-pull",
+      softPush: "btn-soft-push",
+    },
+    APPROX_AVERAGE_CUTOFF_MIN_PERCENT: 1,
+    APPROX_AVERAGE_CUTOFF_MAX_PERCENT: 8,
+    APPROX_AVERAGE_CUTOFF_SCALE: 2.5,
+    VERY_HIGH_THRESHOLD_PERCENT: 75,
+  },
+  Timelines: {
+    GANTT_SCROLL_PX_PER_DAY: 16,
+    HEATMAP_MAX_WEEKS : 106,
+    HEATMAP_MIN_WEEKS : 8,
+    HEATMAP_CELL_PX : 12,
+    HEATMAP_GAP_PX : 3,
+    HEATMAP_LEVEL_THRESHOLDS : [0, 0.15, 0.4, 0.7, 1],
+    HEATMAP_REFERENCE_PERCENTILE: 0.9,
+    HEATMAP_MIN_DAYS_FOR_PERCENTILE_REFERENCE: 5,
+  },
 };

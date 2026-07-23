@@ -168,7 +168,7 @@ let ganttScaleMode = getUserConfig().ganttScaleMode || "infinite";
 // Fixed density used by "scroll" mode - wide enough to keep month labels
 // (if added later) and pause markers legible without needing to be
 // user-configurable; this is a rendering density, not a data limit.
-const GANTT_SCROLL_PX_PER_DAY = 6;
+const GANTT_SCROLL_PX_PER_DAY = Config.Timelines.GANTT_SCROLL_PX_PER_DAY;
 
 /*
  Seed presets shown the first time someone opens Windowed mode with no

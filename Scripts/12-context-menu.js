@@ -32,7 +32,7 @@ const IDLE_THRESHOLD_MS = Config.Sync.IDLE_THRESHOLD_MS;
 // If no user activity is detected for this long, the tab is considered "abandoned" and time tracking pauses
 
 const DB_UPDATE_FREQUENCY = Config.Sync.CLOUD_PROGRESS_PUSH_INTERVAL_MS / 1000;
-const TICK_MS = 2000;
+const TRACKING_TICK_MS = Config.Reading.TRACKING_TICK_MS;
 
 let lastActivityTime = Date.now();
 
@@ -68,7 +68,7 @@ function startActiveReadingTimer() {
         const isUserActive = (Date.now() - lastActivityTime) < IDLE_THRESHOLD_MS;
         if (readerActive && activeBookObject && document.hasFocus() && !document.hidden && isUserActive) {
             if (!activeBookObject.timeSpentSeconds) activeBookObject.timeSpentSeconds = 0;
-            activeBookObject.timeSpentSeconds += (TICK_MS / 1000); // Increments ticker loop heartbeat frequency step bounds
+            activeBookObject.timeSpentSeconds += (TRACKING_TICK_MS / 1000); // Increments ticker loop heartbeat frequency step bounds
             /*
             Batches DB writes every 30 seconds instead of every tick to reduce disk I/O.
             The in-memory book stays accurate on every tick; visibilitychange and
@@ -84,7 +84,7 @@ function startActiveReadingTimer() {
         checking against the longer 5-minute session timeout.
         */
         checkSessionInactivityTimeout();
-    }, TICK_MS);
+    }, TRACKING_TICK_MS);
 }
 
 function stopActiveReadingTimer() {

@@ -246,24 +246,7 @@ function loadSavedUserInterfaceSettings() {
  would strand the user with no way back to their library or no way to
  use a core reading feature.
 */
-const READER_BUTTON_ELEMENT_MAP = {
-    toc: "btn-toggle-toc",
-    prev: "btn-prev-chapter",
-    next: "btn-next-chapter",
-    stats: "btn-global-stats",
-    notes: "btn-global-notes",
-    themes: "theme-selector",
-    sort: "sort-selector",
-    viewMode: "library-view-mode",
-    openSelected: "btn-open-book",
-    lastRead: "btn-last-read",
-    hardReload: "btn-hard-reload",
-    clearLocalData: "btn-clear-local-data",
-    hardPull: "btn-hard-pull",
-    hardPush: "btn-hard-push",
-    softPull: "btn-soft-pull",
-    softPush: "btn-soft-push",
-};
+const READER_BUTTON_ELEMENT_MAP = Config.Miscellaneous.READER_BUTTON_ELEMENT_MAP;
 
 function handleReaderButtonToggle(key, isChecked) {
     const shouldHide = !isChecked;

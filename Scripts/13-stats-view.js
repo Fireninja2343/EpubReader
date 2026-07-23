@@ -65,9 +65,9 @@ function computeStatAveragesByStatus(perBookMetrics) {
  small but meaningful differences visible. It is based on coefficient of
  variation per sample and clamped to a sensible range.
 */
-const APPROX_AVERAGE_CUTOFF_MIN_PERCENT = 1; // minimum cutoff
-const APPROX_AVERAGE_CUTOFF_MAX_PERCENT = 8; // maximum cutoff
-const APPROX_AVERAGE_CUTOFF_SCALE = 2.5; // scales CV-per-sample into a percent cutoff
+const APPROX_AVERAGE_CUTOFF_MIN_PERCENT = Config.Miscellaneous.APPROX_AVERAGE_CUTOFF_MIN_PERCENT; // minimum cutoff
+const APPROX_AVERAGE_CUTOFF_MAX_PERCENT = Config.Miscellaneous.APPROX_AVERAGE_CUTOFF_MAX_PERCENT; // maximum cutoff
+const APPROX_AVERAGE_CUTOFF_SCALE = Config.Miscellaneous.APPROX_AVERAGE_CUTOFF_SCALE; // scales CV-per-sample into a percent cutoff
 
 function computeApproxAverageCutoffPercent(values) {
     if (values.length < 2) return APPROX_AVERAGE_CUTOFF_MIN_PERCENT; // can't measure spread
@@ -132,7 +132,7 @@ function buildStatDeltaHtml(value, average, formatFn, higherLabel, lowerLabel, h
 
     // Very large deltas get a slightly bigger, glowing percentage figure so
     // an extreme outlier catches the eye without needing another color.
-    const VERY_HIGH_THRESHOLD_PERCENT = 75;
+    const VERY_HIGH_THRESHOLD_PERCENT = Config.Miscellaneous.VERY_HIGH_THRESHOLD_PERCENT;
     const emphasisClass = absPercent >= VERY_HIGH_THRESHOLD_PERCENT ? "stat-delta-emphasis" : "";
 
     return `

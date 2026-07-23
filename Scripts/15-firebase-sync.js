@@ -161,9 +161,9 @@ function userDoc() {
  sync pass, or whenever a same-kind push next succeeds.
 */
 let pendingCloudPushRetries = [];
-const PUSH_RETRY_IMMEDIATE_ATTEMPTS = 2; // quick retries before falling back to the queue
-const PUSH_RETRY_IMMEDIATE_DELAY_MS = 1500;
-const PUSH_RETRY_QUEUE_DRAIN_INTERVAL_MS = 30000;
+const PUSH_RETRY_IMMEDIATE_ATTEMPTS = Config.Sync.PUSH_RETRY_IMMEDIATE_ATTEMPTS; // quick retries before falling back to the queue
+const PUSH_RETRY_IMMEDIATE_DELAY_MS = Config.Sync.PUSH_RETRY_IMMEDIATE_DELAY_MS;
+const PUSH_RETRY_QUEUE_DRAIN_INTERVAL_MS = Config.Sync.PUSH_RETRY_QUEUE_DRAIN_INTERVAL_MS;
 
 async function withPushRetry(label, attemptFn) {
   for (let attempt = 0; attempt <= PUSH_RETRY_IMMEDIATE_ATTEMPTS; attempt++) {

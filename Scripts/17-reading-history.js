@@ -225,11 +225,11 @@ function aggregateReadingHistoryByLocalDay(books) {
 // instead of shrinking further into unreadability.
 // HEATMAP_CELL_PX/GAP_PX: fallbacks if --heatmap-cell-size/grid gap can't
 // be read live from CSS (see getHeatmapCellMetrics()).
-const HEATMAP_MAX_WEEKS = 106;
-const HEATMAP_MIN_WEEKS = 8;
-const HEATMAP_CELL_PX = 12;
-const HEATMAP_GAP_PX = 3;
-const HEATMAP_LEVEL_THRESHOLDS = [0, 0.15, 0.4, 0.7, 1]; // fraction-of-reference cutoffs for levels 0-4
+const HEATMAP_MAX_WEEKS = Config.Timelines.HEATMAP_MAX_WEEKS;
+const HEATMAP_MIN_WEEKS = Config.Timelines.HEATMAP_MIN_WEEKS;
+const HEATMAP_CELL_PX = Config.Timelines.HEATMAP_CELL_PX;
+const HEATMAP_GAP_PX = Config.Timelines.HEATMAP_GAP_PX;
+const HEATMAP_LEVEL_THRESHOLDS = Config.Timelines.HEATMAP_LEVEL_THRESHOLDS; // fraction-of-reference cutoffs for levels 0-4
 /*
  Scaling every day against the single highest day (like GitHub's default)
  lets one outlier (a marathon reading day) become the sole yardstick,
@@ -241,8 +241,8 @@ const HEATMAP_LEVEL_THRESHOLDS = [0, 0.15, 0.4, 0.7, 1]; // fraction-of-referenc
  stretching the scale, the same way an outlier still lands in a
  distribution's first/last bucket instead of widening every bucket.
 */
-const HEATMAP_REFERENCE_PERCENTILE = 0.9;
-const HEATMAP_MIN_DAYS_FOR_PERCENTILE_REFERENCE = 5;
+const HEATMAP_REFERENCE_PERCENTILE = Config.Timelines.HEATMAP_REFERENCE_PERCENTILE;
+const HEATMAP_MIN_DAYS_FOR_PERCENTILE_REFERENCE = Config.Timelines.HEATMAP_MIN_DAYS_FOR_PERCENTILE_REFERENCE;
 // below this, not enough days to make a percentile meaningful over the true max - see computeHeatmapReferenceSeconds()
 
 /*
