@@ -18,12 +18,6 @@
     --accent-dim: rgba(247, 200, 166, 0.2);
     --border: #443b31;
     --card-dimension-width: 160px;
-    /* Base RGB triples (no rgba() wrapper) for the stat-delta comparisons in
-       the per-book stats table - see .stat-delta-* below. Kept as raw
-       "r, g, b" so JS can build rgba(var(--stat-good-rgb), <alpha>) strings
-       with a magnitude-driven alpha instead of needing a fixed palette of
-       preset shades. One pair per theme block, same as the other theme
-       colors above, so the delta text stays legible against every theme. */
     --stat-good-rgb: 96, 200, 120;
     --stat-bad-rgb: 224, 100, 100;
 }

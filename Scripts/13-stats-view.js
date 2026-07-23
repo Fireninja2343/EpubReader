@@ -241,13 +241,13 @@ function buildStatsRowHtml(m, statAveragesByStatus) {
     const deltas = buildFourMetricDeltas(m, statAveragesByStatus);
     return `
         <tr style="border-bottom: 1px solid var(--border);">
-            <td">${escapeHtml(m.book.title)}</td>
-            <td color:var(--accent);">${READING_STATUS_LABELS[m.status]}</td>
-            <td">${m.pagesRead} / ${m.totalPages || "—"} pages</td>
-            <td">${formatMinutes(m.mins)}${deltas.timeSpent}</td>
-            <td">${pagesPerHourDisplay}${deltas.pagesPerHour}</td>
-            <td">${formatCompletionDuration(m.completionDurationMs)}${deltas.completionDuration}</td>
-            <td">${m.pagesPerDay !== null ? `${m.pagesPerDay.toFixed(1)} p/day` : "—"}${deltas.pagesPerDay}</td>
+            <td>${escapeHtml(m.book.title)}</td>
+            <td style="color:var(--accent);">${READING_STATUS_LABELS[m.status]}</td>
+            <td>${m.pagesRead} / ${m.totalPages || "—"} pages</td>
+            <td>${formatMinutes(m.mins)}${deltas.timeSpent}</td>
+            <td>${pagesPerHourDisplay}${deltas.pagesPerHour}</td>
+            <td>${formatCompletionDuration(m.completionDurationMs)}${deltas.completionDuration}</td>
+            <td>${m.pagesPerDay !== null ? `${m.pagesPerDay.toFixed(1)} p/day` : "—"}${deltas.pagesPerDay}</td>
         </tr>
     `;
 }
