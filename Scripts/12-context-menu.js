@@ -353,10 +353,10 @@ function triggerContextAction(actionKey) {
  Reloads loadedBooksMemory and refreshes the open stats view if needed, so
  completion-based stats update without requiring navigation away and back.
 */
-function refreshLibraryAndVisibleStats() {
+function refreshLibraryAndVisibleStats(goToStats = true) {
     fetchLocalLibrary();
     const statsPanel = document.getElementById("stats-view");
-    if (statsPanel && statsPanel.style.display !== "none") {
+    if (statsPanel && statsPanel.style.display !== "none" && goToStats) {
         showStatsViewState();
     }
 }
@@ -397,7 +397,7 @@ function submitStartDateModalForm() {
     setBookStartDate(bookId, selectedDate).then((wasUpdated) => {
         if (wasUpdated) {
             closeStartDateModal();
-            refreshLibraryAndVisibleStats();
+            refreshLibraryAndVisibleStats(false);
         } else {
             alert("Couldn't find that book to update.");
         }
@@ -437,7 +437,7 @@ function submitCompletionDateModalForm() {
     setBookCompletionDate(bookId, selectedDate).then((wasUpdated) => {
         if (wasUpdated) {
             closeCompletionDateModal();
-            refreshLibraryAndVisibleStats();
+            refreshLibraryAndVisibleStats(false);
         } else {
             alert("Couldn't find that book to update.");
         }
