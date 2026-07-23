@@ -124,16 +124,12 @@ function submitGroupModalForm() {
                 record.name = nameVal;
                 record.backgroundColor = colorVal;
                 /*
-                 Stamped here, at the moment of the actual local edit, rather
-                 than only ever being set after a successful cloud push (see
-                 stampLocalGroupLastModified() in 11-firebase-sync.js, which
-                 remains as a second line of defense for pushes triggered from
-                 elsewhere, e.g. Hard Push/Soft Sync). Without this, a group
-                 renamed while offline (or while a push is still in-flight/
-                 retrying) would have no local lastModified at all, so
-                 pullInitialSyncFromCloud()'s conflict comparison would have
-                 nothing trustworthy to compare against until the push
-                 eventually succeeds - this closes that gap at the source.
+                Stamped during the actual local edit rather than only after a successful
+                cloud push. stampLocalGroupLastModified() remains as a fallback for other
+                push paths, such as Hard Push or Soft Sync.
+                Without this local timestamp, offline edits or in-flight pushes would leave
+                pullInitialSyncFromCloud() without a reliable value for conflict checks
+                until the push succeeds.
                 */
                 record.lastModified = new Date().getTime();
                 store.put(record);

@@ -3,14 +3,11 @@
 // READER LAUNCH & CHAPTER RENDERING
 // =================================================================
 async function launchEpubReader(bookObject) {
-  /*
-   Guards against a book being launched while another one's reading
-   session is still open in memory - normally showLibraryState() (see
-   11-view-router.js) closes out the previous session before the user can
-   get back to the library grid to pick a new book, but this makes
-   launchEpubReader() safe on its own too, rather than relying entirely on
-   callers going through that path first.
-  */
+/*
+ Guards against launching a book while another reading session is still
+ open. Normally showLibraryState() closes sessions before returning to the
+ library, but this keeps launchEpubReader() safe independently of callers.
+*/
   if (typeof endReadingSession === "function") endReadingSession("newBookLaunched");
 
   activeBookObject = bookObject;
@@ -48,12 +45,9 @@ async function launchEpubReader(bookObject) {
 
     activeSpinePointer = bookObject.currentChapter || 0;
     /*
-     Records the chapter this book was already at (as loaded from IndexedDB/
-     cloud) as the "last pushed" baseline. Without this, the very first
-     trackReadingProgress() call after opening the book would look like a
-     chapter change (since lastPushedChapterIndex still holds whatever the
-     previously-open book left behind) and would trigger a needless
-     immediate cloud push right on open.
+    Records the current chapter as the last pushed baseline when opening a
+    book. Without this, the first progress update could look like a chapter
+    change from the previous book and trigger an unnecessary cloud push.
     */
     lastPushedChapterIndex = activeSpinePointer;
 
@@ -127,11 +121,9 @@ async function parseAndRenderTOC(zip, opfDoc, baseDir) {
   tocList.innerHTML = "";
 
   /*
-   Default every chapter to a plain "Chapter N" label first. Not every
-   spine entry necessarily has a matching TOC nav point (some EPUBs point
-   their TOC at only a subset of files, e.g. chapter starts but not
-   sub-sections), so this guarantees the progress bar tooltip always has
-   something sensible to show even where the TOC below doesn't cover it.
+  Default chapters to "Chapter N" first. Some spine entries lack matching
+  TOC nav points, so this ensures every progress tooltip has a usable label
+  even when the EPUB's TOC does not cover that entry.
   */
   activeChapterTitles = activeSpineArray.map((_, idx) => `Chapter ${idx + 1}`);
 

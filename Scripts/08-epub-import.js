@@ -9,12 +9,11 @@ async function handleFileImport(event) {
     const totalFiles = files.length;
 
     /*
-     Files are processed one at a time, in order, rather than in parallel.
-     Each import involves unzipping a potentially large EPUB, parsing XML,
-     and decoding cover images, so running several of these at once could
-     spike memory usage and make the browser tab unresponsive on a big
-     batch. Processing sequentially keeps memory use predictable at the
-     cost of total import time.
+    Files are processed sequentially instead of in parallel. Each import
+    unzips a potentially large EPUB, parses XML, and decodes images, so
+    parallel processing could spike memory usage on large batches.
+    Sequential handling keeps memory predictable at the cost of slower total
+    import time.
     */
     for (let i = 0; i < totalFiles; i++) {
         const file = files[i];
@@ -48,34 +47,15 @@ async function handleFileImport(event) {
                     }
                 }
             }
-
             /*
-             Word/page/chapter counting reuses the zip and opfDoc already
-             parsed above instead of unzipping the file a second time. This
-             is the one-time cost that lets every later screen (stats table,
-             per-book diagnostics) just read cached numbers off the book
-             record instead of reparsing the EPUB.
+            Word/page/chapter counting reuses the already-parsed zip and opfDoc instead
+            of reopening the EPUB. Later screens can read cached values instead of
+            reparsing files.
             */
             const analysisMeta = await computeEpubWordStats(zip, opfDoc, opfPath);
 
-            /*
-             The parsed book is saved through the shared saveBookToDatabase()
-             helper instead of writing directly to IndexedDB here. That
-             shared helper is responsible for setting default fields like
-             isRead and lastModified, and for kicking off the cloud push of
-             both the metadata and the file itself. Writing straight to
-             IndexedDB in this function would silently skip all of that.
-            */
-            /*
-             saveBookToDatabase() now returns a Promise that resolves once the
-             IndexedDB write actually finishes (see 02-db.js). Previously this
-             wrapped it in a Promise that resolved immediately regardless, so
-             the "process files one at a time" sequencing described above
-             wasn't real: every file's IndexedDB write was fired off and the
-             loop moved on to the next file's parsing before it finished,
-             which could make sortOrder (based on loadedBooksMemory.length at
-             call time) collide across a batch import.
-            */
+            // Saves through saveBookToDatabase() instead of direct IndexedDB writes, so
+            // shared defaults, lastModified updates, and cloud sync are handled too.
             await saveBookToDatabase(title, coverBase64, file, analysisMeta);
 
         } catch (err) {

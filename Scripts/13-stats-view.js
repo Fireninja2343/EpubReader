@@ -1,22 +1,11 @@
 // =================================================================
 // PER-BOOK "DELTA FROM AVERAGE" COMPARISONS
 // =================================================================
-/*
- Computes the four library-wide averages the per-book stats table compares
- each book against: Time Spent (minutes), Pages per Hour, Completion
- Duration (ms), Pages per Day. Each average is only calculated from books
- that actually have valid data for that particular metric - a book with no
- tracked reading time doesn't drag down the Time Spent average, a book
- that's never been completed doesn't count toward Completion Duration, etc.
- Returns null for any average that has no qualifying books at all, which
- buildStatDeltaHtml() below treats as "not enough data, don't show a
- comparison" rather than dividing by zero.
-*/
-function computeStatAverages(perBookMetrics) {
-    const timeSpentValues = perBookMetrics.filter(m => m.mins > 0).map(m => m.mins);
-    const pagesPerHourValues = perBookMetrics.filter(m => m.pagesPerHour !== null).map(m => m.pagesPerHour);
-    const completionDurationValues = perBookMetrics.filter(m => m.completionDurationMs !== null).map(m => m.completionDurationMs);
-    const pagesPerDayValues = perBookMetrics.filter(m => m.pagesPerDay !== null).map(m => m.pagesPerDay);
+function computeStatAveragesForGroup(groupMetrics) {
+    const timeSpentValues = groupMetrics.filter(m => m.mins > 0).map(m => m.mins);
+    const pagesPerHourValues = groupMetrics.filter(m => m.pagesPerHour !== null).map(m => m.pagesPerHour);
+    const completionDurationValues = groupMetrics.filter(m => m.completionDurationMs !== null).map(m => m.completionDurationMs);
+    const pagesPerDayValues = groupMetrics.filter(m => m.pagesPerDay !== null).map(m => m.pagesPerDay);
 
     const mean = (arr) => arr.length ? arr.reduce((sum, v) => sum + v, 0) / arr.length : null;
 
@@ -37,59 +26,61 @@ function computeStatAverages(perBookMetrics) {
         },
     };
 }
+/*
+ Statuses that get their own "delta from average" group. Not Started is
+ excluded because it has no meaningful reading activity.
+
+ Add a new status here if it should compare only against books with the
+ same status. The averaging logic stays generic.
+*/
+const DELTA_COMPARISON_STATUSES = [
+    READING_STATUS.COMPLETED,
+    READING_STATUS.IN_PROGRESS,
+    READING_STATUS.PAUSED,
+];
 
 /*
- Decides, per metric, how large a percent-from-average difference has to be
- before a book stops reading as "≈ average" - replacing what used to be a
- single hardcoded APPROX_THRESHOLD_PERCENT (5%) shared by every metric and
- every library size.
+ Computes separate averages/cutoffs for each status in
+ DELTA_COMPARISON_STATUSES, so books are compared only against others with
+ the same status.
 
- A fixed 5% cutoff has two failure modes this fixes:
-   - Small datasets: with only 2-3 books, the "average" is really just
-     those same 2-3 books, so almost any difference between them is
-     meaningful - there's no larger population for a small gap to be noise
-     against. The cutoff should shrink as the sample shrinks.
-   - Tightly clustered datasets: a library where every book's pages/hour
-     sits within a few percent of the mean (e.g. 68.4/67.8/64.2 p/h - total
-     spread of just 4.2 p/h) has "5% of the mean" be a wide net relative to
-     how little the data actually varies, so real, dataset-defining
-     differences all get flattened into "average". The cutoff should
-     shrink as the data's own relative spread (coefficient of variation)
-     shrinks.
+ Returns an object keyed by status (e.g. result.completed), where each
+ value has the same shape as computeStatAveragesForGroup(), allowing
+ existing delta code to work unchanged.
 
- Both effects are captured in one data-driven number: the coefficient of
- variation (stdDev / mean) scaled down by how many samples support it. CV
- alone captures "how spread out is the data, relative to its own size" -
- unitless, so it's comparable across metrics with very different scales
- (minutes vs p/h vs ms). Dividing by sample count on top of that captures
- "how much do I trust that spread is real dataset structure rather than
- just being all the data there is" - with only 2-3 books, the 'average' IS
- those books, so there's no larger population for a small gap to be noise
- against, and the cutoff needs to shrink sharply (dividing by n rather than
- the gentler sqrt(n) is what makes that shrink sharp enough to actually
- separate 68.4/67.8/64.2 instead of still lumping all three together).
- Clamped to a sensible band so it can never vanish to 0% (any nonzero gap
- would count) or blow up past a normal "meaningfully different" range on a
- huge, noisy library.
+ Iterating DELTA_COMPARISON_STATUSES keeps this function generic—adding a
+ new comparison status only requires updating that list.
 */
-const APPROX_AVERAGE_CUTOFF_MIN_PERCENT = 1; // floor - even maximally-clustered/small data still needs *some* gap to count as different
-const APPROX_AVERAGE_CUTOFF_MAX_PERCENT = 8; // ceiling - never much stricter than the old fixed 5% would allow on a large, naturally spread-out library
-const APPROX_AVERAGE_CUTOFF_SCALE = 2.5; // tunable multiplier translating CV-per-sample into a percent cutoff
+function computeStatAveragesByStatus(perBookMetrics) {
+    const result = {};
+    for (const status of DELTA_COMPARISON_STATUSES) {
+        const groupMetrics = perBookMetrics.filter(m => m.status === status);
+        result[status] = computeStatAveragesForGroup(groupMetrics);
+    }
+    return result;
+}
+/*
+ Computes a dynamic "≈ average" cutoff instead of using a fixed percentage.
+
+ The cutoff shrinks for small samples and tightly clustered data, making
+ small but meaningful differences visible. It is based on coefficient of
+ variation per sample and clamped to a sensible range.
+*/
+const APPROX_AVERAGE_CUTOFF_MIN_PERCENT = 1; // minimum cutoff
+const APPROX_AVERAGE_CUTOFF_MAX_PERCENT = 8; // maximum cutoff
+const APPROX_AVERAGE_CUTOFF_SCALE = 2.5; // scales CV-per-sample into a percent cutoff
 
 function computeApproxAverageCutoffPercent(values) {
-    if (values.length < 2) return APPROX_AVERAGE_CUTOFF_MIN_PERCENT; // no spread is measurable at all with 0-1 points
+    if (values.length < 2) return APPROX_AVERAGE_CUTOFF_MIN_PERCENT; // can't measure spread
 
     const mean = values.reduce((sum, v) => sum + v, 0) / values.length;
     if (!mean) return APPROX_AVERAGE_CUTOFF_MIN_PERCENT;
 
     const variance = values.reduce((sum, v) => sum + (v - mean) ** 2, 0) / values.length;
     const stdDev = Math.sqrt(variance);
-    const coefficientOfVariation = stdDev / Math.abs(mean); // relative spread, unitless
+    const coefficientOfVariation = stdDev / Math.abs(mean); // relative spread
 
-    // Divides by the raw sample count (not sqrt(n)) so a small library's
-    // cutoff shrinks sharply rather than gently - see comment above for why
-    // the gentler sqrt(n) version wasn't sharp enough to split apart a
-    // tightly-clustered 3-book dataset.
+    // Divide by sample count so smaller datasets use a stricter cutoff.
     const cvPerSample = coefficientOfVariation / values.length;
 
     const cutoff = cvPerSample * 100 * APPROX_AVERAGE_CUTOFF_SCALE;
@@ -97,18 +88,11 @@ function computeApproxAverageCutoffPercent(values) {
 }
 
 /*
- Builds the small "↑/↓ X longer/faster/etc than average (+Y%)" line shown
- underneath a stat cell, or "" if there isn't a valid average to compare
- against (either this book lacks the data, or no book in the library does).
+ Builds the "↑/↓ X than average (+Y%)" line beneath a stat, or "" if no
+ valid comparison exists.
 
- higherIsBetter flips which direction (higher or lower than average) counts
- as "good" (green) vs "bad" (red) for this particular metric - e.g. a
- shorter Completion Duration is an improvement, and so is a shorter Time
- Spent (spending less time than average to get through a book reads as
- faster/better), whereas a higher Pages per Hour is the "faster/better"
- direction instead. Each metric only needs a single higher-is-good boolean
- because within that metric one direction is unambiguously the
- "faster/more efficient" one.
+ higherIsBetter determines which direction is considered an improvement
+ for the current metric.
 */
 function buildStatDeltaHtml(value, average, formatFn, higherLabel, lowerLabel, higherIsBetter, approxCutoffPercent) {
     if (value === null || value === undefined || average === null || average === undefined || average === 0) {
@@ -161,23 +145,19 @@ function buildStatDeltaHtml(value, average, formatFn, higherLabel, lowerLabel, h
 }
 
 /*
- Single source of truth for the four comparable per-book metrics (Time
- Spent, Pages per Hour, Completion Duration, Pages per Day) - value getter,
- formatter, and higher-is-better direction all live here once, so anything
- that needs "all four metrics" (buildFourMetricDeltas below, and the
- Reading Speed Over Lifetime average footer in renderReadingSpeedProgression)
- loops over this instead of re-listing the four metrics by hand. Adding a
- fifth comparable metric later is one more entry pushed onto this array -
- nothing that reads it needs to change.
+ Single source of truth for the four comparable per-book metrics:
+ Time Spent, Pages per Hour, Completion Duration, and Pages per Day.
 
- format: wrapped as `(v) => formatMinutes(v)` / `(v) => formatCompletionDuration(v)`
- rather than passed directly (`format: formatMinutes`) - this array literal
- is evaluated once, immediately, when this script file loads, and
- formatMinutes/formatCompletionDuration are only defined later in
- 14-utils.js, which loads after this file. Referencing them directly here
- would look them up at array-creation time (before they exist) and throw;
- wrapping in an arrow function defers that lookup until the format
- function is actually called, by which point every script has loaded.
+ Each metric keeps its value getter, formatter, and higher-is-better
+ direction here, so code needing all four metrics can loop over this
+ instead of maintaining separate lists. Adding another comparable metric
+ only requires adding one entry.
+
+ Formatters use arrow wrappers:
+ `(v) => formatMinutes(v)` instead of `format: formatMinutes`.
+
+ This defers the function lookup until formatting runs, because this file
+ loads before the formatter functions are defined in 14-utils.js.
 */
 const FOUR_METRIC_DEFINITIONS = [
     {
@@ -219,26 +199,32 @@ const FOUR_METRIC_DEFINITIONS = [
 ];
 
 /*
- Computes the same four "delta from average" HTML snippets (Time Spent,
- Pages per Hour, Completion Duration, Pages per Day) for any object shaped
- like a perBookMetrics entry - i.e. anything with .mins, .pagesPerHour,
- .completionDurationMs, .pagesPerDay. Pulled out of buildStatsRowHtml so
- renderReadingSpeedProgression() (the "Reading Speed Over Lifetime" list)
- can show the exact same four comparisons without re-deriving or
- duplicating any of this logic - both call sites just pass in an object
- with those four fields and the shared statAverages.
+ Computes the four "delta from average" HTML snippets:
+ Time Spent, Pages per Hour, Completion Duration, and Pages per Day.
 
- Now just a thin loop over FOUR_METRIC_DEFINITIONS rather than four
- hand-written calls, so this and the definitions list can never drift out
- of sync with each other.
+ Accepts any object shaped like a perBookMetrics entry, and is shared by
+ buildStatsRowHtml and renderReadingSpeedProgression() so both views use
+ the same comparison logic without duplication.
+
+ Uses the book's own status to select averages from
+ statAveragesByStatus:
+ each delta compares only against books with the same status. Statuses
+ without an averages group naturally return no delta through
+ buildStatDeltaHtml() handling.
+
+ Loops over FOUR_METRIC_DEFINITIONS instead of manually writing each
+ metric, keeping this function synchronized with the metric definitions.
 */
-function buildFourMetricDeltas(m, statAverages) {
+function buildFourMetricDeltas(m, statAveragesByStatus) {
+    const groupAverages = statAveragesByStatus[m.status];
     const result = {};
     for (const def of FOUR_METRIC_DEFINITIONS) {
-        result[def.key] = buildStatDeltaHtml(
-            def.getValue(m), statAverages[def.averageKey],
-            def.format, "", "", def.higherIsBetter, statAverages.cutoffs[def.cutoffKey],
-        );
+        result[def.key] = groupAverages
+            ? buildStatDeltaHtml(
+                def.getValue(m), groupAverages[def.averageKey],
+                def.format, "", "", def.higherIsBetter, groupAverages.cutoffs[def.cutoffKey],
+            )
+            : "";
     }
     return result;
 }
@@ -247,59 +233,42 @@ function buildFourMetricDeltas(m, statAverages) {
  Builds one <tr> for the per-book stats table, including the "delta from
  average" line under each of the four comparable stat cells (Time Spent,
  Pages per Hour, Completion Duration, Pages per Day). Split out from the
- main loop in showStatsViewState() since it needs statAverages, which isn't
- known until every book has been visited once - see perBookMetrics there.
+ main loop in showStatsViewState() since it needs statAveragesByStatus,
+ which isn't known until every book has been visited once - see
+ perBookMetrics there.
 */
-function buildStatsRowHtml(m, statAverages) {
+function buildStatsRowHtml(m, statAveragesByStatus) {
     const pagesPerHourDisplay = m.pagesPerHour !== null ? `${m.pagesPerHour.toFixed(1)} p/h` : "—";
-    const deltas = buildFourMetricDeltas(m, statAverages);
+    const deltas = buildFourMetricDeltas(m, statAveragesByStatus);
     return `
         <tr style="border-bottom: 1px solid var(--border);">
-            <td  style="/* padding:12px; */">${escapeHtml(m.book.title)}</td>
-            <td  style="/* padding:12px; */ color:var(--accent);">${READING_STATUS_LABELS[m.status]}</td>
-            <td  style="/* padding:12px; */">${m.pagesRead} / ${m.totalPages || "—"} pages</td>
-            <td  style="/* padding:12px; */">${formatMinutes(m.mins)}${deltas.timeSpent}</td>
-            <td  style="/* padding:12px; */">${pagesPerHourDisplay}${deltas.pagesPerHour}</td>
-            <td  style="/* padding:12px; */">${formatCompletionDuration(m.completionDurationMs)}${deltas.completionDuration}</td>
-            <td  style="/* padding:12px; */">${m.pagesPerDay !== null ? `${m.pagesPerDay.toFixed(1)} p/day` : "—"}${deltas.pagesPerDay}</td>
+            <td">${escapeHtml(m.book.title)}</td>
+            <td color:var(--accent);">${READING_STATUS_LABELS[m.status]}</td>
+            <td">${m.pagesRead} / ${m.totalPages || "—"} pages</td>
+            <td">${formatMinutes(m.mins)}${deltas.timeSpent}</td>
+            <td">${pagesPerHourDisplay}${deltas.pagesPerHour}</td>
+            <td">${formatCompletionDuration(m.completionDurationMs)}${deltas.completionDuration}</td>
+            <td">${m.pagesPerDay !== null ? `${m.pagesPerDay.toFixed(1)} p/day` : "—"}${deltas.pagesPerDay}</td>
         </tr>
     `;
 }
-
 // =================================================================
 // LIBRARY DISTRIBUTION - DYNAMIC BUCKETING ENGINE
 // =================================================================
 /*
- Builds equal-width numeric buckets spanning the data's own range, instead
- of hardcoding fixed cutoffs (e.g. "0-299, 300-499, ..."). This is what
- keeps the Book Length / Reading Speed distributions informative as the
- library's numbers drift over time - e.g. if the average book length crept
- up to 1000+ pages, static 0-299/300-499/.../900+ buckets would dump almost
- everything into the last bucket. Recomputing the bucket edges from the
- live data every time this renders avoids that.
+ Builds equal-width numeric buckets from the data's current range instead
+ of fixed cutoffs, keeping distributions useful as library values change.
 
- The range used for bucket *width* is trimmed using an IQR ("interquartile
- range") fence rather than the raw min/max - a plain min/max range lets a
- single extreme outlier (e.g. one 4000-page book among a library of
- 100-1000 page books) stretch every bucket so wide that almost all the
- "normal" books collapse into the first bucket and the chart stops being
- informative for anyone but the outlier. Fencing the range first means
- bucket width is set by where the bulk of the library actually sits;
- values outside the fence don't disappear - they still get tallied, just
- into the first or last bucket (whose edges are -Infinity/Infinity) rather
- than dictating how wide every bucket is. See buildDynamicBuckets() for the
- exact fence definition.
+ Uses an IQR fence to determine the bucket range rather than raw min/max:
+ extreme outliers cannot stretch all buckets and hide normal data. Values
+ outside the fence are still included in the first or last bucket.
 
- Falls back to the caller-supplied static buckets whenever the dynamic
- approach "doesn't work" - defined here as: fewer than MIN_VALUES_FOR_DYNAMIC
- data points, or a degenerate fenced range (fencedMax === fencedMin, which
- would otherwise produce zero-width buckets and a division by zero - e.g. a
- library where almost every book is exactly the same length aside from one
- or two outliers).
+ Falls back to static buckets when there is not enough data or when the
+ fenced range is degenerate, preventing zero-width buckets and invalid
+ calculations.
 
- Returns an array of {min, max, label} - the first bucket's min and the
- last bucket's max are -Infinity/Infinity so every value, however extreme,
- always has a home.
+ Returns {min, max, label} buckets. The first and last buckets use
+ -Infinity/Infinity so every value is always included.
 */
 const MIN_VALUES_FOR_DYNAMIC_BUCKETS = 5;
 const IQR_FENCE_MULTIPLIER = 1.5; // standard "Tukey's fence" multiplier for mild-outlier trimming
@@ -319,25 +288,19 @@ function buildDynamicBuckets(values, staticBuckets, bucketCount, unitLabel) {
 
     const sorted = [...values].sort((a, b) => a - b);
 
-    /*
-     Bucket *width* is sized off an IQR ("interquartile range") fence
-     rather than the raw min/max, so a single extreme outlier - e.g. one
-     4000-page book sitting in an otherwise 100-1000 page library - can't
-     stretch every bucket wide enough to crush all the "normal" books into
-     the first one. This is the standard Tukey's-fence definition of a mild
-     outlier: anything more than 1.5x the middle 50%'s spread (Q3 - Q1)
-     beyond Q1 or Q3. Clamped back to the real min/max wherever the fence
-     would extend past the actual data (e.g. no outliers at all, where the
-     fence naturally lands outside the data and should just use the data's
-     own edges instead).
+/*
+ Bucket width is based on an IQR fence instead of raw min/max, preventing
+ extreme outliers from stretching every bucket and hiding normal values.
 
-     This is deliberately count-based via quartiles rather than a fixed
-     "trim the outer 10%" cut: chopping a fixed percentage off a small
-     dataset (e.g. 10 books) can still let a single extreme value leak
-     partway into the trimmed edge through interpolation, whereas Q1/Q3 and
-     the fence multiplier scale naturally with how spread out the *bulk* of
-     the data actually is.
-    */
+ Uses Tukey's fence:
+ values beyond 1.5 × (Q3 - Q1) outside the middle 50% are treated as
+ outliers. The fence range is clamped to the actual data range when it
+ extends beyond the available values.
+
+ Uses quartiles instead of trimming a fixed percentage, so the behavior
+ scales naturally with dataset size and distribution rather than removing
+ an arbitrary amount of data.
+*/
     const q1 = percentile(sorted, 0.25);
     const q3 = percentile(sorted, 0.75);
     const iqr = q3 - q1;
@@ -464,18 +427,14 @@ function computeLibraryDistributions(perBookMetrics) {
 }
 
 /*
- Renders one distribution as a simple vertical bar chart into the given
- container id. Shared by all three Library Distribution charts rather than
- each one having its own bespoke rendering - the only thing that differs
- between them is which {entries, eligibleCount} object gets passed in.
+ Renders a distribution bar chart into the given container. Shared by all
+ Library Distribution charts, with only the provided data determining the
+ displayed distribution.
 
- Bar height is driven by the exact same "percent of eligibleCount" figure
- shown in the count/percentage label underneath each bar (rather than a
- separate relative-to-the-largest-bucket calculation) - those two numbers
- disagreeing was a real bug: a bucket could show "3 books (19%)" while its
- bar was drawn at 75% height because the height had been computed against
- the chart's own largest bucket instead of the full eligible count. Tying
- both to the same number keeps what's drawn and what's printed consistent.
+ Bar height uses the same percentage shown in the label below each bar:
+ percent of eligibleCount. This keeps the visual height consistent with the
+ displayed count/percentage instead of scaling against only the largest
+ bucket, which could make labels and bars disagree.
 */
 function renderDistributionBarChart(containerId, distribution) {
     const container = document.getElementById(containerId);
@@ -545,57 +504,44 @@ async function showStatsViewState() {
     const completionsByMonth = {}; // "YYYY-MM" -> completed count
     let totalReadingSessions = 0; // sum of totalSessions, fallback denominator for avg session length
     /*
-     Completion Duration is *calendar* time between firstOpened and
-     completedDate - e.g. "started July 6, finished July 13 -> 7 days" -
-     which is a different metric from reading time (timeSpentSeconds) and
-     is deliberately never derived from it. Tracked in the same single-pass,
-     running-min/max style already used for longestBook/shortestBook above,
-     rather than a second filter/reduce pass over loadedBooksMemory.
+    Completion Duration is calendar time between firstOpened and completedDate,
+    not reading time (timeSpentSeconds). It is calculated separately using
+    the same running min/max approach used by the other book stats.
     */
     let completionDurationSumMs = 0;
     let completionDurationCount = 0;
     let fastestCompletion = null; // {book, durationMs}
     let slowestCompletion = null;
+
     /*
-     Pages/day is a distinct metric from pages/hour: pages/hour is reading
-     time (timeSpentSeconds), pages/day is calendar days between firstOpened
-     and completedDate - the same qualifying condition as Completion
-     Duration above (completed books only, both dates required), just
-     expressed as pages-read / calendar-days instead of a duration string.
-     Tracked with the same single-pass running-min/max approach.
+    Pages/day is based on calendar days between firstOpened and completedDate,
+    unlike pages/hour which uses reading time. It uses the same completed-book
+    requirements and running min/max tracking as Completion Duration.
     */
     let pagesPerDaySum = 0;
     let pagesPerDayCount = 0;
     let fastestPagesPerDay = null; // {book, pagesPerDay}
     let slowestPagesPerDay = null;
+
     /*
-     "Reading Speed Over Lifetime" - per-completed-book pages/hour entries,
-     kept as a flat list (rather than folded into a running sum like the
-     other stats above) because this one needs to be sorted chronologically
-     by completedDate and displayed book-by-book afterward, not just
-     reduced to a single number.
+    "Reading Speed Over Lifetime" stores per-completed-book pages/hour entries
+    as a list because the data must later be sorted by completedDate and
+    displayed individually rather than reduced into one aggregate value.
     */
     const speedProgressionEntries = []; // {book, completedDate, pagesPerHour}
+
     /*
-     Real per-session durations, pulled straight from each book's
-     readingSessions log (see appendReadingSession() in 02-db.js /
-     endReadingSession() in this file). This is the actual source of truth
-     for "average session length" going forward - totalSessions/sessionTime
-     above only exist as a fallback for books that predate this feature
-     and have no readingSessions recorded yet (requirement: existing books
-     without session history should continue working).
+    Stores real reading session durations from each book's readingSessions log.
+    This is the source of truth for average session length, while older books
+    without session history fall back to the legacy totalSessions/sessionTime
+    values.
     */
     const allRealSessionDurationsMins = [];
 
     /*
-     Raw per-book metric values, collected during the single pass below and
-     turned into table rows only afterward (see the second pass right after
-     this loop) - the "delta from average" comparisons need the full-dataset
-     averages, which aren't known until every book has been visited, so row
-     HTML can't be finalized until this loop is done. Keeping this as a flat
-     array of plain values (rather than re-deriving them a second time) means
-     the delta pass reuses the exact same numbers already computed here
-     instead of duplicating any of the calculations above.
+    Stores raw per-book metrics collected during the first pass. Averages are
+    only available after all books are processed, so delta comparisons and row
+    HTML are generated afterward using these already-calculated values.
     */
     const perBookMetrics = [];
 
@@ -639,14 +585,13 @@ async function showStatsViewState() {
         }
 
         /*
-         Only books with both fields qualify - a book can be marked read (or
-         have a manually-edited completedDate via setBookCompletionDate())
-         without firstOpened ever having been set, e.g. a very old record.
-         Pages/day is derived from the same completionDurationMs computed
-         here rather than re-deriving it, but is additionally gated on
-         isRead since - unlike Completion Duration - it's a "completed
-         books only" metric (calendar days is floored at 1 so a same-day
-         completion can't divide by a near-zero day count).
+        Only books with both fields qualify. A book may have a completedDate
+        without firstOpened, such as older records or manually edited completions.
+
+        Uses the existing completionDurationMs value instead of recalculating it,
+        and additionally requires isRead because Pages/day only applies to
+        completed books. Calendar days are floored at 1 to avoid near-zero
+        same-day completion divisions.
         */
         let completionDurationMs = null;
         let pagesPerDay = null;
@@ -694,24 +639,22 @@ async function showStatsViewState() {
         const meaningfulTrackedSeconds = getMeaningfulTrackedSeconds(book.timeSpentSeconds);
         const mins = getMeaningfulTrackedMinutes(book.timeSpentSeconds);
         if (mins > 0) timedPagesRead += pagesRead;
-
         /*
-         Reading Speed Over Lifetime: completed books only, needs both a
-         completedDate (for chronological sorting) and MEANINGFUL tracked
-         reading time - previously gated on the raw "timeSpentSeconds > 0"
-         (any nonzero value, however tiny) and divided by the raw,
-         unrounded seconds directly. That let a book with e.g. 6 tracked
-         seconds produce an absurd pages/hour figure (344 pages / (6/3600)
-         hours = 206,400 p/h) in this list even though the main per-book
-         table correctly showed "0m" for that same book - see
-         getMeaningfulTrackedSeconds() in 14-utils.js, now the single
-         shared gate both this and the main table's `mins` above go
-         through, so they can never disagree again.
+        Reading Speed Over Lifetime uses completed books with a completedDate and
+        meaningful tracked reading time. A raw timeSpentSeconds > 0 check allowed
+        tiny values to create unrealistic pages/hour results.
+
+        Uses getMeaningfulTrackedSeconds() as the shared validation gate, matching
+        the main per-book table and preventing inconsistent calculations.
         */
         if (isRead && book.completedDate && totalPages > 0 && meaningfulTrackedSeconds > 0) {
             const trackedReadingHours = meaningfulTrackedSeconds / 3600;
             speedProgressionEntries.push({
                 book,
+                // Every entry here is a completed book by construction 
+                // (see the isRead && book.completedDate gate above), so stamp the status explicitly
+                // for buildFourMetricDeltas() to use the Completed averages group.
+                status: READING_STATUS.COMPLETED,
                 completedDate: book.completedDate,
                 pagesPerHour: totalPages / trackedReadingHours,
                 mins: getMeaningfulTrackedMinutes(book.timeSpentSeconds),
@@ -720,52 +663,44 @@ async function showStatsViewState() {
             });
         }
 
-        // Stash this book's raw metric values instead of building its row
-        // string right now - see perBookMetrics comment above.
+        // Stash this book's raw metric values instead of building its row string
+        // immediately - see perBookMetrics comment above.
         perBookMetrics.push({
             book,
             isRead,
-            // Same "has the user actually opened/progressed this book" check
-            // already used just above for the pagesRead estimate - reused
-            // here (rather than re-derived) for the Reading Status
-            // distribution's "In Progress" vs "Not Started" split.
+            // Same "has the user actually opened/progressed this book" check used
+            // above for pagesRead, reused for the Reading Status distribution split.
             isStarted: book.currentChapter > 0 || book.scrollOffset > 100,
-            // Finer-grained status than isRead/isStarted above - adds
-            // "Paused" (in progress, but no real reading activity for
-            // longer than Config.Reading.PAUSED_INACTIVITY_THRESHOLD_MS) on
-            // top of the existing Completed/In Progress/Not Started split.
-            // See getBookReadingStatus() in 14-utils.js, the single source
-            // of truth this and the Completion Timeline's Gantt mode both
-            // read from.
+            // Adds "Paused" detection on top of Completed/In Progress/Not Started.
+            // Uses getBookReadingStatus() as the shared source for status logic.
             status: getBookReadingStatus(book),
             pagesRead,
             totalPages,
             mins,
-            pagesPerHour: mins > 0 ? (pagesRead / mins * 60) : null, // numeric, not the "—"-formatted string used in the old inline template
+            pagesPerHour: mins > 0 ? (pagesRead / mins * 60) : null, // numeric, not the old formatted string
             completionDurationMs,
             pagesPerDay,
         });
     }
+        /*
+        Computes per-status averages for the per-book delta comparisons:
+        Time Spent, Pages per Hour, Completion Duration, and Pages per Day.
 
-    /*
-     Averages used for the per-book "delta from average" comparisons (Time
-     Spent, Pages per Hour, Completion Duration, Pages per Day). Deliberately
-     computed from perBookMetrics rather than re-walking loadedBooksMemory:
-     the qualifying condition for each metric ("has valid data") is exactly
-     "this book contributed a non-null value to perBookMetrics", so reusing
-     that array keeps the qualifying logic in one place (the main loop above)
-     instead of redefining it a second time here. See computeStatAverages().
-    */
-    const statAverages = computeStatAverages(perBookMetrics);
+        Each book is compared only against others with the same status
+        (Completed/In Progress/Paused). Uses perBookMetrics so the same metric
+        validity rules from the main loop are reused instead of being duplicated.
+
+        See computeStatAveragesByStatus().
+        */
+        const statAveragesByStatus = computeStatAveragesByStatus(perBookMetrics);
 
     // Flush table rows inside dashboard
-    tbody.innerHTML = perBookMetrics.map(m => buildStatsRowHtml(m, statAverages)).join("");
+    tbody.innerHTML = perBookMetrics.map(m => buildStatsRowHtml(m, statAveragesByStatus)).join("");
 
-    /*
-     Library Distribution charts (Book Length, Reading Status, Reading
-     Speed) - see computeLibraryDistributions()/renderDistributionBarChart()
-     above. Reuses perBookMetrics rather than a fresh pass over
-     loadedBooksMemory, same as statAverages just above.
+   /*
+    Library Distribution charts (Book Length, Reading Status, and Reading
+    Speed) reuse perBookMetrics instead of performing another pass over
+    loadedBooksMemory, matching the approach used by statAveragesByStatus.
     */
     const libraryDistributions = computeLibraryDistributions(perBookMetrics);
     renderDistributionBarChart("dist-book-length", libraryDistributions.bookLength);
@@ -787,18 +722,15 @@ async function showStatsViewState() {
         : 0;
 
     /*
-     Average reading session length now prefers real recorded sessions
-     (actual engaged-reading durations from readingSessions - see
-     appendReadingSession()/endReadingSession()) over the old
-     totalSessions/timeSpentSeconds approximation. Falls back to that
-     approximation only for whatever books haven't accumulated any real
-     session records yet, so older libraries keep showing a reasonable
-     number instead of suddenly dropping to zero.
+    Average reading session length prefers real recorded sessions from
+    readingSessions over the old totalSessions/timeSpentSeconds estimate.
+
+    Falls back to the old approximation only for books without session
+    history, keeping older libraries from losing their average value.
     */
     const avgSessionMins = allRealSessionDurationsMins.length
         ? Math.round(allRealSessionDurationsMins.reduce((sum, m) => sum + m, 0) / allRealSessionDurationsMins.length)
         : (totalReadingSessions ? Math.round(sessionTime / totalReadingSessions) : 0);
-
     // Update standard interface element outputs values
     document.getElementById("stat-total-books").innerText = totalBooksCount;
     document.getElementById("stat-read-books").innerText = readBooksCount;
@@ -886,32 +818,30 @@ async function showStatsViewState() {
             : "—";
     }
 
-    /*
-     Completion Timeline now lives in 14-completion-timeline.js as a
-     modular multi-mode system (see buildCompletionTimelineData() there).
-     completionsByMonth computed above still feeds the per-book table's
-     other stats untouched - only the timeline rendering itself moved out.
-     The data object is stashed on window so the mode-switch buttons and
-     hover-tooltip handlers (wired via inline onclick/onmouseenter, which
-     only get the DOM event) can look it back up without recomputing it.
+   /*
+    Completion Timeline is handled by 18-timeline.js as a modular
+    multi-mode system through buildCompletionTimelineData().
+
+    completionsByMonth still feeds the per-book stats table unchanged. The
+    timeline data is stored on window so mode buttons and tooltip handlers can
+    reuse it without rebuilding the data.
     */
     window.__completionTimelineData = buildCompletionTimelineData(loadedBooksMemory);
     renderCompletionTimeline(window.__completionTimelineData);
-    renderReadingSpeedProgression(speedProgressionEntries, statAverages);
+    renderReadingSpeedProgression(speedProgressionEntries, statAveragesByStatus);
 
-    // See 17-reading-history.js. Guarded the same way the other optional
-    // stats-view pieces in this function are, so this keeps working whether
-    // or not that script (and its container in index.html) is present.
+    // See 17-reading-history.js. Guarded like other optional stats components,
+    // so this still works if the script or container is not present.
     if (typeof renderReadingActivityCalendar === "function") {
         renderReadingActivityCalendar();
     }
 }
 
 /*
- Handler for the "Backfill Completion Dates" button in the stats view.
- Runs the bulk migration in 02-db.js, refreshes loadedBooksMemory from
- IndexedDB, re-renders the stats view so the timeline and counts reflect
- the newly-filled-in dates, and reports back how many books were touched.
+Handler for the "Backfill Completion Dates" button.
+
+Runs the bulk migration, refreshes IndexedDB data, re-renders stats, and
+reports how many books received completion dates.
 */
 async function handleBackfillCompletionDatesClick() {
     const button = document.getElementById("btn-backfill-completion-dates");
@@ -937,24 +867,18 @@ async function handleBackfillCompletionDatesClick() {
 }
 
 /*
- Renders #stats-reading-speed-progression, showing full per-book metrics
- (Time Spent, Pages per Hour, Completion Duration, Pages per Day - the same
- four shown in the "Individual Breakdown Per Book" table, including their
- "delta from average" lines) for every completed book, grouped by the month
- it was completed in and sorted chronologically - so the person can see
- whether their reading pace is trending up or down over time, book to book.
- Deliberately a flat chronological list rather than an average-per-month
- rollup: with typically just a few completions per month, showing each book
- individually is what actually surfaces a trend. Ends with the single
- overall average pages/hour across every entry.
+ Renders #stats-reading-speed-progression with the four per-book metrics:
+ Time Spent, Pages per Hour, Completion Duration, and Pages per Day.
 
- Reuses buildFourMetricDeltas() - the same helper the per-book table above
- uses - rather than re-implementing the delta/average-comparison logic a
- second time here; entries carry the same mins/completionDurationMs/
- pagesPerDay fields as a perBookMetrics row specifically so this works (see
- where speedProgressionEntries is built in showStatsViewState()).
+ Shows completed books individually, grouped by completion month and sorted
+ chronologically, so reading pace changes can be seen book by book instead
+ of being hidden by monthly averages.
+
+ Reuses buildFourMetricDeltas() from the per-book table instead of
+ duplicating delta logic. Entries contain the same metric fields and always
+ belong to the Completed averages group.
 */
-function renderReadingSpeedProgression(entries, statAverages) {
+function renderReadingSpeedProgression(entries, statAveragesByStatus) {
     const container = document.getElementById("stats-reading-speed-progression");
     if (!container) return;
 
@@ -986,7 +910,7 @@ function renderReadingSpeedProgression(entries, statAverages) {
 
         const rows = byMonth[monthKey]
             .map((entry) => {
-                const deltas = buildFourMetricDeltas(entry, statAverages);
+                const deltas = buildFourMetricDeltas(entry, statAveragesByStatus);
                 return `
                     <div style="padding:6px 0 10px 16px; border-bottom:1px dashed var(--border);">
                         <div style="font-weight:500; margin-bottom:4px;">${escapeHtml(entry.book.title)}</div>
@@ -1022,26 +946,22 @@ function renderReadingSpeedProgression(entries, statAverages) {
     });
 
     /*
-     "Average" footer - one line per comparable metric (Time Spent, Pages
-     per Hour, Completion Duration, Pages per Day), read straight off the
-     shared statAverages object (see computeStatAverages()) rather than
-     recomputed here. Looping over FOUR_METRIC_DEFINITIONS instead of
-     writing one line per metric by hand means this footer automatically
-     picks up any future metric added to that list without needing its own
-     edit - it stays a plain "average for whatever's comparable" list.
+    "Average" footer shows one line per comparable metric:
+    Time Spent, Pages per Hour, Completion Duration, and Pages per Day.
 
-     Each metric formats its own average with the same format() function
-     used to render individual books' values (e.g. formatMinutes for Time
-     Spent, formatCompletionDuration for Completion Duration), so the units
-     the footer shows are guaranteed to match the units used everywhere
-     else in this section. A metric with no qualifying books at all (mean()
-     returned null in computeStatAverages) is simply skipped rather than
-     shown as "—", since an average of zero books isn't a real average to
-     report.
+    Reads averages from the Completed group in statAveragesByStatus instead
+    of recalculating them, since every entry here is a completed book.
+    Loops over FOUR_METRIC_DEFINITIONS so future metrics are included
+    automatically.
+
+    Uses each metric's own format() function, keeping footer units consistent
+    with individual book values. Metrics without qualifying books are skipped
+    instead of showing an invalid zero-book average.
     */
+    const completedAverages = statAveragesByStatus[READING_STATUS.COMPLETED];
     const averageRows = FOUR_METRIC_DEFINITIONS
         .map((def) => {
-            const average = statAverages[def.averageKey];
+            const average = completedAverages[def.averageKey];
             if (average === null || average === undefined) return "";
             return `
                 <div class="speed-progression-average-row">

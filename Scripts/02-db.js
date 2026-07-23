@@ -65,25 +65,16 @@ function fetchLocalLibrary() {
          option (title, date added, progress, etc.) the user currently
          has selected, so the UI reflects that ordering right away. */
       sortLibrary();
-      /*
-       Fire-and-forget: backfills totalPages/totalWords/chapterCount on any
-       book that predates those fields (see ensureBookMetadataCached() in
-       06-epub-reader.js). Not awaited here so the library still renders
-       immediately; it's a no-op per book once that book has been migrated,
-       so calling it after every fetch costs nothing on repeat visits.
-      */
+      // Fire-and-forget: backfills missing totalPages/totalWords/chapterCount on
+      // older books. Runs in the background so rendering is not delayed, and is a
+      // no-op after each book has already been migrated.
       if (typeof migrateMissingBookMetadata === "function") {
-        migrateMissingBookMetadata();
+          migrateMissingBookMetadata();
       }
-      /*
-       Fire-and-forget, same treatment as migrateMissingBookMetadata()
-       just above: backfills lastModified on any book/group that predates
-       it being stamped at write time (see backfillMissingField() and
-       migrateMissingLastModified() above). A no-op (zero writes) once
-       every record already has one, so calling it after every fetch
-       costs nothing on repeat visits - same reasoning as the metadata
-       migration above.
-      */
+      // Fire-and-forget migration for missing lastModified fields on books/groups.
+      // Runs after fetch like the metadata migration above. Once all records have
+      // timestamps, it performs no writes on future runs.
+      
       if (typeof migrateMissingLastModified === "function") {
         migrateMissingLastModified();
       }
@@ -91,10 +82,6 @@ function fetchLocalLibrary() {
   };
 }
 
-// Returns a Promise that resolves only once the book has actually been
-// written to IndexedDB (previously this function returned nothing, so
-// handleFileImport()'s "await saveBookToDatabase(...)" was never really
-// waiting for anything — see the fix in 06-epub-reader.js).
 function saveBookToDatabase(title, coverData, binaryData, analysisMeta = {}) {
   return new Promise((resolve) => {
     const transaction = db.transaction([STORE_BOOKS], "readwrite");
@@ -129,17 +116,13 @@ function saveBookToDatabase(title, coverData, binaryData, analysisMeta = {}) {
       lastOpened: null,
       completedDate: null,
       totalSessions: 0,
-      /* Real reading-session log (see startReadingSession()/endReadingSession()
-         in 09-stats-and-context-menu.js). Separate from totalSessions above
-         (which just counts reader launches) so average session length uses
-         actual engaged reading time, not "time spent / times opened". */
+      // Real reading-session log (see continueOrStartReadingSession/endReadingSession() in
+      // 12-context-menu.js). Tracks actual engaged reading time instead
+      // of estimating from launches and total time.
       readingSessions: [],
-      /* Raw per-session activity log powering the reading-activity heatmap
-         (13-reading-history.js, upsertReadingHistoryEntry() below).
-         readingSessions stores closed-session summaries; readingHistory
-         stores the raw {startTimestamp, endTimestamp, secondsSpent,
-         chapterStart, chapterEnd} an in-progress session flushes into, so
-         pages/day etc. can be derived later without storing a derived value. */
+      // Raw per-session activity log powering the reading-activity heatmap
+      // (17-reading-history.js). Stores timestamps and chapter progress so metrics
+      // like pages/day can be derived later without storing derived values.
       readingHistory: [],
     };
     store.add(entry).onsuccess = (e) => {
@@ -158,12 +141,10 @@ function saveBookToDatabase(title, coverData, binaryData, analysisMeta = {}) {
 }
 
 /*
- Firestore's free tier caps writes at 20k/day. Reading progress is tracked
- on every scroll pixel, so pushing to the cloud on every single update
- would burn through that daily cap within minutes of normal reading.
- IndexedDB is written every time regardless (that's local, free, and
- instant) — only the Firestore push is throttled, using the timestamps
- below to make sure at most one cloud write per book happens within each
+ Firestore has a limited daily write quota, so pushing every scroll update
+ would quickly exhaust it during normal reading.
+ IndexedDB is still updated immediately;
+ only Firestore writes are throttled so each book syncs at most once per
  CLOUD_PROGRESS_PUSH_INTERVAL_MS window.
 */
 let lastCloudProgressPush = {};
@@ -186,11 +167,11 @@ function updateBookProgressInDB(bookId, spinePointer, scrollPosition, forceImmed
         const now = Date.now();
         const last = lastCloudProgressPush[bookId] || 0;
         /*
-         forceImmediateCloudPush lets a caller (trackReadingProgress, when it
-         detects the chapter itself just changed) bypass the usual 20s
-         throttle for this one push. The timestamp below is still updated
-         either way, so a forced push here also resets the throttle window
-         rather than stacking on top of it.
+        forceImmediateCloudPush lets callers bypass the normal 20s throttle for
+        important updates, such as chapter changes.
+
+        The timestamp is still updated after the push, so forced pushes also reset
+        the throttle window instead of creating additional queued writes.
         */
         if (forceImmediateCloudPush || now - last >= CLOUD_PROGRESS_PUSH_INTERVAL_MS) {
           lastCloudProgressPush[bookId] = now;
@@ -200,21 +181,10 @@ function updateBookProgressInDB(bookId, spinePointer, scrollPosition, forceImmed
     }
   };
 }
-
 /*
- Sends the latest reading progress to the cloud immediately, ignoring the
- throttle above. This should be called right before the in-memory reading
- session is about to be lost — for example when the reader closes the book,
- the tab is backgrounded, or the tab/window is closing — so the last few
- seconds of progress aren't dropped by the throttle window. The timestamp
- is still updated here so this can't fire twice in immediate succession.
-*/
-/*
- Flips a book's isRead flag to true and syncs the change locally and to the
- cloud. Called from trackReadingProgress() once the user has actually
- scrolled to the bottom of the last chapter, so books don't stay stuck at
- "In Progress" just because the user never opened the context menu to
- toggle read status manually.
+ Marks a book as read and syncs the change locally and to the cloud.
+ Called when the user reaches the end of the last chapter, preventing books
+ from remaining "In Progress" when they were completed through reading.
 */
 function markBookAsRead(bookId) {
   if (!bookId || !db) return;
@@ -239,13 +209,11 @@ function markBookAsRead(bookId) {
 }
 
 /*
- Picks the best available estimate for a completed book's completedDate,
- for books that were marked isRead before completedDate existed as a
- field. Falls through the fields in order of how trustworthy they are as
- a stand-in for "when did this book actually get finished": lastOpened
- (most recent reader visit) first, then lastModified (last time the
- record changed at all), then firstOpened, and only if none of those
- exist does it fall back to right now.
+ Picks the best available completedDate estimate for books marked isRead
+ before completedDate existed.
+
+ Uses fields in trust order: lastOpened, lastModified, firstOpened, then
+ the current time only if no better timestamp exists.
 */
 function estimateCompletionDate(book) {
   return book.lastOpened || book.lastModified || book.firstOpened || new Date().getTime();
@@ -253,29 +221,15 @@ function estimateCompletionDate(book) {
 
 /*
  GENERIC FIELD-BACKFILL MIGRATION PRIMITIVE
- The sync system (11-firebase-sync.js) needs every synced record to have
- a lastModified timestamp to resolve local/cloud conflicts - a record
- with none reads as 0 (oldest possible), which by design lets a genuinely
- newer copy win. But two records that both lack one are indistinguishable
- from "tied" - worth resolving once, locally, rather than leaving forever.
 
- backfillMissingField() is one reusable implementation of that backfill,
- parameterized by store/field so future migrations call into this instead
- of writing their own scan-and-backfill loop (migrateMissingCompletionDates()
- below and migrateMissingBookMetadata() in 06-epub-reader.js predate this
- and still duplicate that pattern).
+ Provides reusable field backfilling for synced records that need missing
+ values, such as lastModified timestamps required for conflict resolution.
 
- Parameters:
-   storeName            - which IndexedDB store to scan
-   isMissing(record)     -> true if this record needs backfilling
-   computeValue(record)  -> value to assign for the missing field
-   fieldName            - property to set
-   pushFn(record)        - optional, fire-and-forget cloud push per
-                           backfilled record
+ Parameterized by store, field, missing check, value generator, and optional
+ cloud push so future migrations reuse this instead of duplicating loops.
 
- Resolves to the count backfilled. Only touches records missing the
- field, so it's a no-op after the first run - safe to call unconditionally
- on every load with no separate "already migrated" flag needed.
+ Resolves with the number of updated records. Only modifies missing fields,
+ making repeated runs safe without migration flags.
 */
 function backfillMissingField(storeName, isMissing, computeValue, fieldName, pushFn) {
   return new Promise((resolve) => {
@@ -308,21 +262,15 @@ function backfillMissingField(storeName, isMissing, computeValue, fieldName, pus
 }
 
 /*
- Runs the lastModified backfill for every currently-synced local data
- type (books, groups; notes/note tags are handled by
- migrateMissingNoteLastModified() in 12-notes.js, called from
- fetchNotesLibrary() the same way this is called from fetchLocalLibrary()
- below). Adding a future synced store to this backfill is one more
- backfillMissingField() call here (or in whichever file owns that store's
- fetch-on-load hook), not a new migration function.
+ Runs lastModified backfill for synced local data types:
+ books and groups. Notes/tags use their own migration from 12-notes.js.
 
- estimateLastModifiedFallback() picks the best available "this record was
- last touched around here" signal for the field types this backfill
- currently covers, so a backfilled timestamp is at least a reasonable
- guess at true edit recency rather than an arbitrary "right now" that
- would make an old, never-recently-touched record look freshly edited
- (and therefore wrongly win a future sync conflict against a genuinely
- more recent cloud copy).
+ Adding another synced store only requires another backfillMissingField()
+ call in the owning load hook, not a new migration function.
+
+ estimateLastModifiedFallback() uses the best available timestamp signal
+ instead of always using "now", avoiding false recent edits during sync
+ conflict resolution.
 */
 function migrateMissingLastModified() {
   backfillMissingField(
@@ -342,12 +290,10 @@ function migrateMissingLastModified() {
 }
 
 /*
- Finds every book where isRead is true but completedDate is missing
- (older completions predating that field) and backfills it using
- estimateCompletionDate() above. Never overwrites a completedDate that's
- already set. Returns a Promise resolving to the number of books updated,
- so callers (the bulk backfill button and the stats view) can report a
- count back to the user.
+ Finds books marked as read but missing completedDate, then fills it using
+ estimateCompletionDate().
+ Never overwrites existing dates. Resolves with the number of updated books
+ so callers can report the migration result.
 */
 function migrateMissingCompletionDates() {
   return new Promise((resolve) => {
@@ -408,12 +354,9 @@ function migrateSingleBookCompletionDate(bookId) {
 }
 
 /*
- Directly sets (or clears, when passed null) a book's completedDate. This
- is the write path for the manual "Edit Completion Date" and "Clear
- Completion Date" context menu actions - unlike migrateSingleBookCompletionDate()
- above, it's not gated on isRead or on completedDate currently being empty,
- since a manual edit is allowed to overwrite an existing date or blank one
- out outright. The migration functions above are left untouched by this.
+ Directly sets or clears a book's completedDate for manual edits.
+ Unlike migration functions, this can overwrite existing dates or clear
+ them entirely, since manual changes are not limited by migration rules.
 */
 function setBookCompletionDate(bookId, completedDateValue) {
   return updateBookRecord(bookId, (record) => {
@@ -422,17 +365,11 @@ function setBookCompletionDate(bookId, completedDateValue) {
 }
 
 /*
- Called once per reader launch (see launchEpubReader() in
- 06-epub-reader.js) - every visit to the reader counts as a new reading
- session for that book. firstOpened is only ever set the first time;
- lastOpened and totalSessions update on every open after that.
+ Called once per reader launch, where each visit counts as a new session.
 
- NOTE: totalSessions here still just counts launches, kept exactly as
- before for backward compatibility with existing stats and cloud data.
- The *actual* engaged-reading session (start time, duration, pages read)
- is tracked separately - see startReadingSession()/endReadingSession() in
- 09-stats-and-context-menu.js, which write into readingSessions via
- appendReadingSession() below once a session genuinely ends.
+ firstOpened is only set once, while lastOpened and totalSessions update on
+ every open. totalSessions remains launch-based for compatibility; actual
+ engaged-reading sessions are tracked separately through readingSessions.
 */
 function recordReadingSessionStart(bookId) {
   if (!bookId || !db) return;
@@ -460,18 +397,12 @@ function recordReadingSessionStart(bookId) {
 }
 
 /*
- Appends one completed reading-session record to a book's readingSessions
- array and persists it. This is the write path for a *real* session end
- (see endReadingSession() in 09-stats-and-context-menu.js), as opposed to
- recordReadingSessionStart() above which just counts the launch.
+ Appends a completed real reading session to readingSessions and persists
+ it. This is used when a session actually ends, unlike recordReadingSessionStart()
+ which only tracks launches.
 
- sessionRecord shape: { start, end, durationSeconds, pagesRead, timestamp }
-
- Trims the array to Config.Reading.MAX_STORED_SESSIONS_PER_BOOK (keeping
- the most recent ones) so this can't grow unbounded for a book that's
- been opened hundreds of times. Existing books that predate this field
- simply have no readingSessions array yet - defaulting to [] here handles
- that transparently, no separate migration needed.
+ Trims stored sessions to MAX_STORED_SESSIONS_PER_BOOK and defaults missing
+ arrays to [] so older books require no migration.
 */
 function appendReadingSession(bookId, sessionRecord) {
   if (!bookId || !db || !sessionRecord) return Promise.resolve(false);
@@ -524,24 +455,12 @@ function appendReadingSession(bookId, sessionRecord) {
 }
 
 /*
- Write path for one readingHistory entry - raw {startTimestamp, endTimestamp,
- secondsSpent, chapterStart, chapterEnd} data used by the reading-activity
- calendar/heatmap in the stats view (see 13-reading-history.js).
+ Appends a completed real reading session to readingSessions and persists
+ it. This is used when a session actually ends, unlike recordReadingSessionStart()
+ which only tracks launches.
 
- Unlike appendReadingSession() above (which only ever appends a fully-closed
- session once), a single in-progress reading session is flushed here
- repeatedly *while it's still open* - see persistHistorySegment() in
- 13-reading-history.js, called from the periodic save cadence, chapter
- changes, and session-end. Any entry sharing the same startTimestamp is
- therefore the same still-open segment being extended, not a new one, so it
- gets updated in place rather than appended again - this is what keeps one
- uninterrupted reading session as a single history entry instead of many
- tiny fragments.
-
- Existing books that predate this field simply have no readingHistory array
- yet; the `if (!Array.isArray(...))` guard below initializes it lazily the
- first time new activity is actually recorded, with no separate migration
- step and no attempt to fabricate any historical entries.
+ Trims stored sessions to MAX_STORED_SESSIONS_PER_BOOK and defaults missing
+ arrays to [] so older books require no migration.
 */
 function upsertReadingHistoryEntry(bookId, entry) {
   if (!bookId || !db || !entry) return Promise.resolve(false);

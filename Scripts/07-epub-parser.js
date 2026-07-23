@@ -2,12 +2,11 @@
 // EPUB METADATA ANALYSIS & CACHING
 // =================================================================
 /*
- Core word/page/chapter counting logic, factored out so it exists in one
- place instead of three (previously handleFileImport, the stats-modal
- diagnostics, and the global stats table each carried their own copy of
- this same spine-walking word count loop). Takes an already-open zip and
- parsed OPF document, since callers that just imported or launched a book
- already have both in memory and shouldn't have to unzip a second time.
+ Core word/page/chapter counting logic, kept in one place instead of being
+ duplicated across import, diagnostics, and global stats code.
+
+ Takes an already-open zip and parsed OPF document so callers can reuse
+ existing data instead of unzipping and parsing the same EPUB again.
 */
 async function computeEpubWordStats(zip, opfDoc, opfPath) {
   const spineElements = opfDoc.querySelectorAll("spine > itemref");
@@ -59,12 +58,11 @@ async function analyzeEpubFile(fileData) {
 }
 
 /*
- Backfills totalPages/totalWords/chapterCount on a single book that
- predates those fields. A no-op (no zip ever opened) for any book that
- already has all three, so calling this liberally - on every library load
- and every stats view open - costs nothing once a book has been migrated
- once. Updates IndexedDB, the in-memory loadedBooksMemory entry, and
- pushes the result to the cloud the same way any other metadata edit does.
+ Backfills totalPages, totalWords, and chapterCount for older books missing
+ those fields.
+ Does nothing for already-migrated books, so repeated calls during library
+ loads or stats views have no cost after the first update. Updates IndexedDB,
+ memory, and cloud sync like any other metadata change.
 */
 async function ensureBookMetadataCached(book) {
   if (!book || !book.fileData) return book;
@@ -104,13 +102,11 @@ async function ensureBookMetadataCached(book) {
 }
 
 /*
- Runs ensureBookMetadataCached() across the whole library. Books are
- processed one at a time rather than in parallel, for the same reason
- handleFileImport() processes a batch import sequentially - unzipping
- several potentially large EPUBs at once risks spiking memory on a big
- library. metadataMigrationInProgress guards against overlapping runs,
- since this gets triggered both after every fetchLocalLibrary() call and
- explicitly (awaited) when the stats view opens.
+ Runs ensureBookMetadataCached() across the library.
+ Processes books sequentially instead of in parallel to avoid memory spikes
+ from unzipping multiple large EPUBs at once. metadataMigrationInProgress
+ prevents overlapping runs from repeated triggers during library loads or
+ stats view opening.
 */
 let metadataMigrationInProgress = false;
 async function migrateMissingBookMetadata() {

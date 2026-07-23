@@ -6,75 +6,72 @@ window.addEventListener("DOMContentLoaded", () => {
 // PROGRESS BAR INTERACTION ROUTINES & RENDERING SPLITS
 // =================================================================
 function renderProgressBarTicks() {
-  const tickContainer = document.getElementById("chapter-ticks-container");
-  const segmentContainer = document.getElementById("chapter-segments-container");
-  tickContainer.innerHTML = "";
-  segmentContainer.innerHTML = "";
-  if (activeSpineArray.length === 0) return;
+    const tickContainer = document.getElementById("chapter-ticks-container");
+    const segmentContainer = document.getElementById("chapter-segments-container");
+    tickContainer.innerHTML = "";
+    segmentContainer.innerHTML = "";
+    if (activeSpineArray.length === 0) return;
 
-  const segmentWidth = 100 / activeSpineArray.length;
+    const segmentWidth = 100 / activeSpineArray.length;
 
-  /*
-   One hoverable "chapter segment" div per chapter, sized to that chapter's
-   share of the bar. These sit underneath the tick separators (appended to
-   a container earlier in the DOM, so the tick lines still draw on top of
-   them) and are what actually respond to :hover — expanding slightly and
-   revealing a tooltip with that chapter's title. Built from
-   activeChapterTitles, which parseAndRenderTOC() fills in before this runs.
-  */
-  for (let i = 0; i < activeSpineArray.length; i++) {
-    const segment = document.createElement("div");
-    segment.className = "chapter-segment";
-    segment.style.left = `${segmentWidth * i}%`;
-    segment.style.width = `${segmentWidth}%`;
+    /*
+     Creates one hoverable segment per chapter, sized by its share of the bar.
+     Segments sit beneath tick separators and provide hover tooltips using titles
+     from activeChapterTitles, populated by parseAndRenderTOC().
+    */
+    for (let i = 0; i < activeSpineArray.length; i++) {
+        const segment = document.createElement("div");
+        segment.className = "chapter-segment";
+        segment.style.left = `${segmentWidth * i}%`;
+        segment.style.width = `${segmentWidth}%`;
 
-    const tooltip = document.createElement("div");
-    tooltip.className = "chapter-segment-tooltip";
-    tooltip.innerText = activeChapterTitles[i] || `Chapter ${i + 1}`;
-    segment.appendChild(tooltip);
+        const tooltip = document.createElement("div");
+        tooltip.className = "chapter-segment-tooltip";
+        tooltip.innerText = activeChapterTitles[i] || `Chapter ${i + 1}`;
+        segment.appendChild(tooltip);
 
-    segmentContainer.appendChild(segment);
-  }
-
-  // Thin divider ticks marking each chapter boundary (none needed if there's only one chapter)
-  if (activeSpineArray.length > 1) {
-    for (let i = 1; i < activeSpineArray.length; i++) {
-      const tick = document.createElement("div");
-      tick.className = "chapter-tick-marker";
-      tick.style.left = `${segmentWidth * i}%`;
-      tickContainer.appendChild(tick);
+        segmentContainer.appendChild(segment);
     }
-  }
+
+    // Thin divider ticks marking each chapter boundary (none needed if there's only one chapter)
+    if (activeSpineArray.length > 1) {
+        for (let i = 1; i < activeSpineArray.length; i++) {
+            const tick = document.createElement("div");
+            tick.className = "chapter-tick-marker";
+            tick.style.left = `${segmentWidth * i}%`;
+            tickContainer.appendChild(tick);
+        }
+    }
 }
 
 function handleProgressBarClick(event) {
-  if (!activeBookObject || activeSpineArray.length === 0) return;
+    if (!activeBookObject || activeSpineArray.length === 0) return;
 
-  const track = document.getElementById("progress-line-track");
-  const rect = track.getBoundingClientRect();
-  const clickX = event.clientX - rect.left;
-  const widthPercentage = clickX / rect.width;
+    const track = document.getElementById("progress-line-track");
+    const rect = track.getBoundingClientRect();
+    const clickX = event.clientX - rect.left;
+    const widthPercentage = clickX / rect.width;
 
-  // Direct mathematical interpolation of timeline bounds coordinates
-  const targetSpineFloat = widthPercentage * activeSpineArray.length;
-  let targetChapterIndex = Math.floor(targetSpineFloat);
-  let chapterInnerScrollPercentage = targetSpineFloat - targetChapterIndex;
+    // Direct mathematical interpolation of timeline bounds coordinates
+    const targetSpineFloat = widthPercentage * activeSpineArray.length;
+    let targetChapterIndex = Math.floor(targetSpineFloat);
+    let chapterInnerScrollPercentage = targetSpineFloat - targetChapterIndex;
 
-  // Bounds clamps validations routines
-  if (targetChapterIndex >= activeSpineArray.length)
-    targetChapterIndex = activeSpineArray.length - 1;
-  if (targetChapterIndex < 0) targetChapterIndex = 0;
+    // Bounds clamps validations routines
+    if (targetChapterIndex >= activeSpineArray.length)
+        targetChapterIndex = activeSpineArray.length - 1;
+    if (targetChapterIndex < 0) targetChapterIndex = 0;
 
-  activeSpinePointer = targetChapterIndex;
+    activeSpinePointer = targetChapterIndex;
 
-  renderActiveChapterFromZip(activeZipInstance).then(() => {
-    setTimeout(() => {
-      const container = document.getElementById("reader-container");
-      const maxScroll = container.scrollHeight - container.clientHeight;
-      container.scrollTop = maxScroll * chapterInnerScrollPercentage;
-      trackReadingProgress();
-    }, 180);
-  });
+    renderActiveChapterFromZip(activeZipInstance).then(() => {
+        setTimeout(() => {
+            const container = document.getElementById("reader-container");
+            const maxScroll = container.scrollHeight - container.clientHeight;
+            container.scrollTop = maxScroll * chapterInnerScrollPercentage;
+            trackReadingProgress();
+        }, 180);
+    });
 }
 
 function trackReadingProgress() {
@@ -87,23 +84,20 @@ function trackReadingProgress() {
     const top = container.scrollTop;
 
     /*
-     The end-of-chapter banner gets appended into the text frame itself
-     once innerPct crosses 0.95, which grows scrollHeight right after the
-     user has already scrolled near the bottom. Left uncorrected, maxScroll
-     keeps growing out from under the user and innerPct (and therefore the
-     global book percentage) can never actually reach 100%. Subtracting the
-     banner's own height from maxScroll keeps the denominator pinned to the
-     real chapter content.
+    The end-of-chapter banner increases scrollHeight after the user reaches
+    the bottom, causing maxScroll to grow and preventing 100% progress.
+    Subtracting the banner height keeps the denominator based on actual chapter
+    content instead of the added UI element.
     */
     const banner = document.getElementById("chapter-end-action-banner");
     const bannerHeight = banner ? banner.offsetHeight : 0;
     const maxScroll = Math.max(0, container.scrollHeight - container.clientHeight - bannerHeight);
-    
+
     // 1. CALCULATE STANDALONE CHAPTER METRICS
     // Determine the exact position inside the active single text node
     const innerPct = maxScroll > 0 ? Math.min(1, top / maxScroll) : 1;
     const chapterProgressPercentage = Math.round(innerPct * 100);
-    
+
     // Inject immediately into your new chapter metrics indicator label
     const chapterPctDisplay = document.getElementById("chapter-percentage-display");
     if (chapterPctDisplay) {
@@ -117,7 +111,7 @@ function trackReadingProgress() {
 
     const totalPctDisplay = document.getElementById("percentage-display");
     const progressFillBar = document.getElementById("progress-indicator-bar");
-    
+
     if (totalPctDisplay) totalPctDisplay.innerText = `${bookScalePct}%`;
     if (progressFillBar) progressFillBar.style.width = `${bookScalePct}%`;
 
@@ -125,7 +119,7 @@ function trackReadingProgress() {
     if (top < maxScroll - 10) {
         overscrollCounter = 0;
     }
-    
+
     // Fire next chapter call invitation block if hitting the final layout stretch
     if (innerPct >= 0.95 && !document.getElementById("chapter-end-action-banner")) {
         injectChapterEndBanner();
@@ -138,21 +132,16 @@ function trackReadingProgress() {
     if (isLastChapter && innerPct >= 1 && activeBookObject && !activeBookObject.isRead) {
         markBookAsRead(activeBookObject.id);
     }
-    
+
     // Commit current positions background states mutations to IndexedDB
     if (activeBookObject) {
-        /*
-         Normally cloud pushes are throttled to once per
-         CLOUD_PROGRESS_PUSH_INTERVAL_MS (20s) so scroll-driven updates don't
-         burn through the Firestore write quota. But a chapter change is a
-         much bigger, much rarer jump than a scroll tick, and it's exactly
-         the kind of update that's most valuable to have on the cloud right
-         away — if the tab is closed a minute later without ever returning
-         to the library, the throttle window could otherwise swallow it
-         entirely. So whenever activeSpinePointer differs from the last
-         chapter that was actually pushed, this bypasses the throttle for
-         just this one push.
-        */
+    /*
+    Normally cloud pushes are throttled to avoid Firestore writes from
+    scroll-driven updates. Chapter changes bypass the throttle because they are
+    rarer and more important to preserve immediately.
+    Without this, closing the tab before the next throttle window could lose a
+    meaningful chapter progress update.
+    */
         const chapterHasChangedSinceLastPush = lastPushedChapterIndex !== activeSpinePointer;
         updateBookProgressInDB(activeBookObject.id, activeSpinePointer, top, chapterHasChangedSinceLastPush);
         if (chapterHasChangedSinceLastPush) {
@@ -174,8 +163,7 @@ function trackReadingProgress() {
 /*
 document.getElementById("reader-container").addEventListener("wheel", (e) => {
   const container = e.currentTarget;
-  const isAtBottom =
-    container.scrollTop >= container.scrollHeight - container.clientHeight - 2;
+  const isAtBottom = container.scrollTop >= container.scrollHeight - container.clientHeight - 2;
   if (isAtBottom && e.deltaY > 0) {
     overscrollCounter++;
     if (overscrollCounter >= 3) {
@@ -186,19 +174,19 @@ document.getElementById("reader-container").addEventListener("wheel", (e) => {
 });
 */
 async function stepToNextChapter() {
-  if (activeSpinePointer < activeSpineArray.length - 1) {
-    activeSpinePointer++;
-    await renderActiveChapterFromZip(activeZipInstance);
-    saveAndApplyUserStyles();
-  }
+    if (activeSpinePointer < activeSpineArray.length - 1) {
+        activeSpinePointer++;
+        await renderActiveChapterFromZip(activeZipInstance);
+        saveAndApplyUserStyles();
+    }
 }
 
 async function stepToPrevChapter() {
-  if (activeSpinePointer > 0) {
-    activeSpinePointer--;
-    await renderActiveChapterFromZip(activeZipInstance);
-    saveAndApplyUserStyles();
-  }
+    if (activeSpinePointer > 0) {
+        activeSpinePointer--;
+        await renderActiveChapterFromZip(activeZipInstance);
+        saveAndApplyUserStyles();
+    }
 }
 
 // =================================================================
@@ -216,7 +204,7 @@ function loadSavedUserInterfaceSettings() {
         if (config.margins) document.getElementById("setting-margins").value = config.margins;
         if (config.paragraphSpacing) document.getElementById("setting-paragraph-spacing").value = config.paragraphSpacing;
         if (config.scrollSpeed) document.getElementById("setting-scroll-delay").value = config.scrollSpeed;
-        
+
         // Handle explicit initialization properties for text overrides
         const overrideCheckbox = document.getElementById("setting-enable-color-override");
         if (overrideCheckbox) {
@@ -224,7 +212,7 @@ function loadSavedUserInterfaceSettings() {
             if (config.fontColor) document.getElementById("setting-font-color").value = config.fontColor;
             handleColorOverrideToggle(false); // Update interaction wrapper opacity states silently
         }
-        
+
         // Sync card metrics scales layout constraints if exists
         if (config.cardSize) {
             const cardSizeInput = document.getElementById("setting-card-size");
@@ -331,14 +319,14 @@ function saveAndApplyUserStyles() {
     document.getElementById("lbl-margins").innerText = margin;
     document.getElementById("lbl-paragraph-spacing").innerText = paragraphSpacing;
     document.getElementById("lbl-scroll-speed").innerText = scrollSpeed;
-    
+
     const frame = document.getElementById("text-render-frame");
     const container = document.getElementById("reader-container");
-    
+
     container.style.padding = `40px ${margin}%`;
     frame.style.fontSize = `${size}px`;
     frame.style.lineHeight = lineSpacing;
-    
+
     // --- APPLY PARAGRAPH SPACING OVERRIDES ---
     // Inject bottom margin padding values dynamically into all internal paragraphs
     frame.querySelectorAll("p, div, blockquote").forEach(el => {
@@ -349,7 +337,7 @@ function saveAndApplyUserStyles() {
         }
     });
     // ------------------------------------------
-    
+
     // --- SAFE OVERRIDE COLOR CHECK CODES ---
     if (colorOverrideEnabled) {
         frame.style.color = color;
@@ -370,12 +358,12 @@ function saveAndApplyUserStyles() {
 function handleColorOverrideToggle(shouldTriggerReapply = true) {
     const isEnabled = document.getElementById("setting-enable-color-override").checked;
     const wrapper = document.getElementById("color-picker-wrapper");
-    
+
     if (wrapper) {
         wrapper.style.opacity = isEnabled ? "1" : "0.5";
         wrapper.style.pointerEvents = isEnabled ? "auto" : "none";
     }
-    
+
     if (shouldTriggerReapply) {
         saveAndApplyUserStyles();
     }
@@ -384,21 +372,19 @@ function handleColorOverrideToggle(shouldTriggerReapply = true) {
 
 
 function toggleSidebar(id) {
-  const bar = document.getElementById(id);
-  const isOpen = bar.classList.contains("active");
-  document
-    .querySelectorAll(".reader-sidebar")
-    .forEach((s) => s.classList.remove("active"));
-  if (!isOpen) bar.classList.add("active");
+    const bar = document.getElementById(id);
+    const isOpen = bar.classList.contains("active");
+    document
+        .querySelectorAll(".reader-sidebar")
+        .forEach((s) => s.classList.remove("active"));
+    if (!isOpen) bar.classList.add("active");
 }
 
 /*
- Settings is reachable both from the library and from the reader (it now
- lives outside #reader-view so it isn't hidden away with the reader panel -
- see index.html/styles.css). The content is identical either way; only the
- order of the two sections changes, so the Reader Settings block is right
- at hand while actually reading, but tucked at the bottom (after the
- library-oriented settings) when opened from the library.
+ Settings is accessible from both library and reader views because it now
+ lives outside #reader-view. The content stays identical; only section
+ ordering changes so reader settings are prioritized while reading and
+ placed after library settings from the library view.
 */
 function openSettingsPanel(context) {
     const sidebar = document.getElementById("settings-sidebar");
@@ -417,7 +403,7 @@ function openSettingsPanel(context) {
 }
 
 function changeActiveTheme(themeKey) {
-  document.documentElement.setAttribute("data-theme", themeKey);
+    document.documentElement.setAttribute("data-theme", themeKey);
 }
 
 // =================================================================
@@ -425,28 +411,28 @@ function changeActiveTheme(themeKey) {
 // Triggered by trackReadingProgress() once scrolled past 95% of a chapter.
 // =================================================================
 function injectChapterEndBanner() {
-  const frame = document.getElementById("text-render-frame");
-  if (!frame || document.getElementById("chapter-end-action-banner")) return;
+    const frame = document.getElementById("text-render-frame");
+    if (!frame || document.getElementById("chapter-end-action-banner")) return;
 
-  const isLastChapter = activeSpinePointer >= activeSpineArray.length - 1;
+    const isLastChapter = activeSpinePointer >= activeSpineArray.length - 1;
 
-  const banner = document.createElement("div");
-  banner.id = "chapter-end-action-banner";
-  banner.className = "chapter-end-banner";
+    const banner = document.createElement("div");
+    banner.id = "chapter-end-action-banner";
+    banner.className = "chapter-end-banner";
 
-  const label = document.createElement("span");
-  label.innerText = isLastChapter
-    ? "You've reached the end of the book."
-    : "End of chapter.";
-  banner.appendChild(label);
+    const label = document.createElement("span");
+    label.innerText = isLastChapter
+        ? "You've reached the end of the book."
+        : "End of chapter.";
+    banner.appendChild(label);
 
-  if (!isLastChapter) {
-    const nextBtn = document.createElement("button");
-    nextBtn.className = "btn-next-chapter-action";
-    nextBtn.innerText = "Next Chapter ⏭️";
-    nextBtn.onclick = () => stepToNextChapter();
-    banner.appendChild(nextBtn);
-  }
+    if (!isLastChapter) {
+        const nextBtn = document.createElement("button");
+        nextBtn.className = "btn-next-chapter-action";
+        nextBtn.innerText = "Next Chapter ⏭️";
+        nextBtn.onclick = () => stepToNextChapter();
+        banner.appendChild(nextBtn);
+    }
 
-  frame.appendChild(banner);
+    frame.appendChild(banner);
 }

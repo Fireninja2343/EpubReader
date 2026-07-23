@@ -2,20 +2,12 @@
 // READING STATUS - shared classification (stats table + Timeline Gantt mode)
 // =================================================================
 /*
- Four statuses, in the order a book moves through them:
+ Status flow:
  notStarted -> inProgress -> (paused <-> inProgress)* -> completed.
 
-   - completed: book.isRead is true. Always wins, even after a long gap.
-   - notStarted: no real recorded activity (readingSessions/readingHistory
-     both empty). Real sessions already require genuine interaction and a
-     minimum duration to get logged (see continueOrStartReadingSession()/
-     endReadingSession() in 09-stats-and-context-menu.js and
-     persistHistorySegment() in 13-reading-history.js), so this is a
-     reliable "opened it but never engaged" signal without duplicating
-     that logic here.
-   - paused: has real activity, not completed, but most recent activity is
-     older than Config.Reading.PAUSED_INACTIVITY_THRESHOLD_MS.
-   - inProgress: has real activity, not completed, within the pause threshold.
+ completed always wins. notStarted means no real recorded activity exists.
+ paused means activity exists but is older than the inactivity threshold;
+ inProgress means recent activity exists and the book is not completed.
 */
 const READING_STATUS = {
     COMPLETED: "completed",
@@ -121,14 +113,11 @@ function getAllFromLocalStore(storeName) {
     req.onerror = () => reject(req.error);
   });
 }
-
 /*
- Stamps lastModified onto a local IndexedDB record (group/note/note tag)
- after a successful cloud push, and mirrors it into that record's
- in-memory cache array if present - shared shape behind
- stampLocalGroupLastModified/stampLocalNoteLastModified/
- stampLocalNoteTagLastModified in 11-firebase-sync.js. cacheArray may be
- undefined (e.g. not yet loaded) - skipped safely in that case.
+ Stamps lastModified after a successful cloud push and mirrors the value
+ into the matching in-memory cache entry when available.
+ Shared by group, note, and note-tag sync helpers. Missing cache arrays are
+ safely ignored when the data has not been loaded yet.
 */
 function stampLocalRecordLastModified(storeName, cacheArray, recordId, lastModified) {
   if (!db) return Promise.resolve();
@@ -282,32 +271,16 @@ function escapeHtml(str) {
     .replace(/'/g, "&#39;");
 }
 
-// =================================================================
-// LIGHTWEIGHT MARKDOWN - note/comment display formatting
-// =================================================================
 /*
- Small purpose-built formatter for note comments (see buildNoteCard() in
- 12-notes.js), not a general Markdown engine - too narrow a use case to
- justify a full library. Supports:
+ LIGHTWEIGHT MARKDOWN - note/comment display formatting
 
-   **bold** -> <strong>, *italic* -> <em>, ~~strike~~/-strike- -> <del>,
-   `code` -> <code>, __underline__ -> <u>, "- item"/"* item" -> <ul>,
-   "1. item" -> <ol>
+ Purpose-built formatter for note comments, not a full Markdown engine.
+ Supports bold, italic, strike, code, underline, unordered lists, and
+ ordered lists.
 
- SAFETY: raw text is escaped FIRST (escapeHtml), before any Markdown
- substitution - every rule below only wraps already-escaped text in a
- fixed tag, so user-typed HTML can never survive into the rendered output.
-
- Rule order matters:
-   1. Inline code is pulled out to placeholder tokens first, so Markdown
-      characters inside a code span are never misinterpreted, then
-      restored verbatim at the end.
-   2. Bold before italic (share the * character) - matching ** greedily
-      first avoids it being parsed as an empty italic span.
-   3. Strikethrough/underline don't share a marker with the above, so
-      their order doesn't matter.
-   4. Lists are handled last, block-level, over the already inline-
-      formatted text split by line.
+ Escapes raw text before substitutions so user HTML cannot reach the output.
+ Inline code is protected first, then restored; bold runs before italic to
+ avoid `**` being interpreted incorrectly. Lists are processed last.
 */
 function renderLightweightMarkdown(rawText) {
     if (rawText === null || rawText === undefined || rawText === "") return "";
@@ -445,13 +418,11 @@ function base64ToBlob(base64) {
 }
 
 /*
- Single source of truth for "does this book's tracked timeSpentSeconds
- count as real reading time, or noise" (a stray tap, an instant open/close).
- See Config.Reading.MIN_MEANINGFUL_TRACKED_SECONDS for the threshold.
- Returns 0 below the threshold, unchanged otherwise - every stats call site
- should route through this (or the minutes wrapper below) rather than
- reading timeSpentSeconds directly, so a tiny value can't distort an
- average/rate in one place while showing "0m" in another.
+ Single source of truth for whether tracked timeSpentSeconds represents
+ meaningful reading or just noise from brief opens/taps.
+ Returns 0 below the configured threshold and the original value otherwise.
+ Stats should use this instead of reading timeSpentSeconds directly, so
+ tiny values cannot distort calculations inconsistently.
 */
 function getMeaningfulTrackedSeconds(rawSeconds) {
     const seconds = rawSeconds || 0;

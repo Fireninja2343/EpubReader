@@ -115,12 +115,12 @@
 }
 
 /*
-    Collapsed: the section shrinks to just its colored border-left plus a slim ~40px strip holding the checkbox and title
-    flex: 0 0 auto takes it out of the "grow to fill the row" competition entirely,
-    so several collapsed sections naturally packnnext to each other (each claiming only its own ~40px) instead of each
-    grabbing an even share of the row, which is what lets freed-up horizontal space actually get reused by whatever comes after them.
-    writing-mode flips the heading vertical so the title is still readable top-to-bottom without needing the
-    673px an expanded heading has to work with; text-overflow clips a very long name rather than growing the strip.
+ Collapsed sections shrink to a slim ~40px strip with only the border, checkbox,
+ and title visible.
+ flex: 0 0 auto prevents collapsed sections from sharing leftover row space,
+ allowing freed width to be reused by following sections. writing-mode keeps
+ vertical titles readable, while text-overflow prevents long names expanding
+ the strip.
 */
 .note-tag-section.collapsed {
     flex: 0 0 auto;
@@ -262,7 +262,7 @@
 .note-card-comment {
     font-size: 13px;
     color: var(--text-muted);
-    font-style: italic;
+    font-style: normal;
     overflow-wrap: break-word;
     word-break: break-word;
     min-width: 0;

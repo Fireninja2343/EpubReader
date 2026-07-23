@@ -199,10 +199,9 @@ function openBookAndTrackLastRead(book) {
   launchEpubReader(book);
 }
 
-// Opens whichever single book is currently selected via the grid's click
-// selection (as opposed to the double-click-to-open shortcut). Backs the
-// #btn-open-book button, which is only shown while exactly one book is
-// selected (see handleGridCardClick below).
+// Opens the currently selected book from grid selection, separate from the
+// double-click shortcut. Used by #btn-open-book, which appears only when
+// exactly one book is selected (see handleGridCardClick).
 function openSelectedBook() {
   if (selectedBookIds.length !== 1) return;
   const book = loadedBooksMemory.find((b) => b.id === selectedBookIds[0]);

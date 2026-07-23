@@ -36,16 +36,14 @@ const TICK_MS = 2000;
 
 let lastActivityTime = Date.now();
 
-// Tracks physical user activity or autoscroller movement, so the timer below
-// can tell "tab focused and visible" apart from "tab focused, visible, and abandoned"
+// Tracks physical activity or autoscroller movement, so the timer can
+// distinguish active reading from an abandoned focused tab.
 function recordUserActivity() {
     lastActivityTime = Date.now();
     /*
-     Also feeds the real reading-session tracker below: the first activity
-     after the reader opens is what actually starts a session (opening the
-     reader alone does not), and every subsequent activity keeps extending
-     the session's "last interaction" clock that the inactivity check uses
-     to decide when the session has ended.
+     Starts or extends the real reading session tracker. The first activity
+     after opening starts a session, while later activity updates the
+     inactivity timeout used to detect session end.
     */
     continueOrStartReadingSession();
 }
@@ -54,16 +52,13 @@ window.addEventListener("keydown", recordUserActivity);
 // If the autoscroller scrolls a different element than this, update the id below to match
 document.getElementById("reader-container")?.addEventListener("scroll", recordUserActivity);
 /*
- mousemove/keydown/scroll alone miss deliberate clicks that don't also
- involve moving the mouse first - e.g. clicking directly on the progress
- bar (handleProgressBarClick in 10-reader-controls.js), the "Next Chapter"
- banner button (injectChapterEndBanner), or selecting text to create a
- note (16-notes.js). All of those are real engagement with the book and
- should both reset the idle clock and be able to start a session on their
- own, so click is captured on the reader container as well.
+ Captures clicks that other activity listeners miss, such as progress bar
+ changes, chapter banner buttons, or note selection actions.
+
+ These interactions count as reading engagement, so they should reset the
+ idle timer and start a session when needed.
 */
 document.getElementById("reader-container")?.addEventListener("click", recordUserActivity);
-
 
 function startActiveReadingTimer() {
     if (focusedTimeTrackerHeartbeatInterval) return;
@@ -75,22 +70,18 @@ function startActiveReadingTimer() {
             if (!activeBookObject.timeSpentSeconds) activeBookObject.timeSpentSeconds = 0;
             activeBookObject.timeSpentSeconds += (TICK_MS / 1000); // Increments ticker loop heartbeat frequency step bounds
             /*
-             Batches the DB write to every 30 seconds (15 ticks) instead of every
-             tick, to cut down on disk I/O. activeBookObject in RAM stays perfectly
-             accurate every tick regardless - only the persisted copy lags behind,
-             and the visibilitychange/beforeunload handlers above flush the
-             trailing remainder so nothing gets lost when the tab hides or closes.
+            Batches DB writes every 30 seconds instead of every tick to reduce disk I/O.
+            The in-memory book stays accurate on every tick; visibilitychange and
+            beforeunload handlers flush remaining time before the tab hides or closes.
             */
             if (activeBookObject.timeSpentSeconds % DB_UPDATE_FREQUENCY === 0) {
                 saveTimeToDB();
             }
         }
         /*
-         Session inactivity check runs on every tick regardless of the
-         isUserActive gate above (which just pauses time-tracking - a
-         session that's gone quiet needs to be checked against the much
-         longer 5-minute session timeout even while time-tracking itself
-         is paused).
+        Session inactivity is checked every tick regardless of isUserActive.
+        The activity gate only pauses time tracking; inactive sessions still need
+        checking against the longer 5-minute session timeout.
         */
         checkSessionInactivityTimeout();
     }, TICK_MS);
@@ -114,73 +105,40 @@ function saveTimeToDB() {
         const record = e.target.result;
         if (record) {
             record.timeSpentSeconds = activeBookObject.timeSpentSeconds;
-            /*
-             Root-cause fix: this write previously never touched
-             lastModified, unlike every other book-mutating write path in
-             the app (updateBookProgressInDB(), markBookAsRead(), the
-             toggleRead/group context-menu actions above, etc. - all of
-             them stamp it). Firestore's sync model (pullInitialSyncFromCloud()
-             in 15-firebase-sync.js) decides which side of a conflict is
-             newer purely by comparing lastModified - a timeSpentSeconds
-             update that doesn't bump it is therefore invisible to that
-             comparison. Concretely: read on mobile for 4 minutes ->
-             timeSpentSeconds updates and gets pushed to the cloud, but
-             under whatever stale lastModified this book already had ->
-             desktop's own local lastModified for that book can easily be
-             equal-or-newer -> desktop's pull never sees the cloud copy as
-             newer -> desktop keeps displaying its own old
-             timeSpentSeconds forever, permanently diverged from the
-             cloud/mobile despite both being "synced." Stamping it here
-             closes that gap the same way every other mutation already does.
-            */
             record.lastModified = now;
             store.put(record);
         }
     };
 
     /*
-     Reuses this exact same batched cadence (called from the tick loop every
-     DB_UPDATE_FREQUENCY seconds, plus from the hide/close safety nets) to
-     also flush the open reading-history segment - see 17-reading-history.js.
-     No separate interval needed, and it means active reading is never more
-     than one of these save cycles away from being safely persisted if the
-     tab crashes or closes unexpectedly.
+    Reuses the existing DB update cadence to flush the open reading-history
+    segment, avoiding a separate interval. Active reading stays within one save
+    cycle of being persisted.
     */
     if (typeof persistHistorySegment === "function") persistHistorySegment();
 
     /*
-     Mirrors the same stamped lastModified back into activeBookObject (the
-     in-memory copy the rest of the reader UI reads from), consistent with
-     how recordReadingSessionStart()/appendReadingSession() (02-db.js)
-     already mirror their own writes back into activeBookObject.
+    Mirrors the updated lastModified into activeBookObject, keeping the
+    in-memory reader state consistent with the database write, like the other
+    session-related updates already do.
     */
     activeBookObject.lastModified = now;
 }
 
-// =================================================================
-// REAL READING-SESSION LIFECYCLE ENGINE
-// =================================================================
 /*
- This is distinct from recordReadingSessionStart() in 02-db.js, which just
- increments totalSessions once per reader launch (kept as-is for backward
- compatibility - see that function's comment). The engine below tracks
- when the person is actually engaged with a book:
+ REAL READING-SESSION LIFECYCLE ENGINE
 
-   - a session STARTS on the first real interaction after the reader
-     opens (not merely on open - a 5-second peek that's immediately
-     closed never becomes a session at all)
-   - a session CONTINUES for as long as interactions keep arriving within
-     Config.Reading.SESSION_INACTIVITY_TIMEOUT_MS (~5 minutes) of each other
-   - a session ENDS - and gets saved via appendReadingSession() - when the
-     reader closes, the tab/window closes, or that inactivity timeout
-     elapses with no further interaction
+ Separate from recordReadingSessionStart() which only counts reader launches
+ for compatibility. This tracks actual engaged reading activity.
+
+ Sessions start on first interaction, continue while activity stays within
+ the timeout window, and end on close, tab exit, or inactivity timeout,
+ saving through appendReadingSession().
 */
 const SESSION_INACTIVITY_TIMEOUT_MS = Config.Reading.SESSION_INACTIVITY_TIMEOUT_MS;
 
-// Starts a session on first interaction, or just extends the "still going"
-// clock if one is already open. Cheap no-op guard if the reader isn't
-// actually the active view (e.g. activity events firing while browsing
-// the library) or there's no book loaded yet.
+// Starts a session on first interaction or extends the active session clock.
+// No-op when the reader is inactive, another view is open, or no book is loaded.
 function continueOrStartReadingSession() {
     const readerActive = document.getElementById("reader-view")?.classList.contains("active");
     if (!readerActive || !activeBookObject) return;
@@ -216,21 +174,16 @@ function checkSessionInactivityTimeout() {
 }
 
 /*
- Closes out the currently open session (if any) and persists it via
- appendReadingSession() in 02-db.js. Safe to call speculatively - e.g. from
- visibilitychange/beforeunload - since it's a no-op whenever no session is
- currently open (either none was ever started, or one was already ended).
- reason is purely for debugging/console visibility, not stored.
+ Closes and persists the active reading session through appendReadingSession().
+ Safe to call from cleanup paths because it does nothing when no session is
+ open. reason is only used for debugging.
 */
 function endReadingSession(reason) {
     /*
-     Finalizes the raw reading-history segment (see 17-reading-history.js)
-     at exactly the same moments a real session ends - reader closes, tab/
-     window becomes inactive, the inactivity timeout elapses, or a new book
-     is launched. Called unconditionally, before the early-return branches
-     below, since it's self-contained (a no-op if no segment is open) and
-     shouldn't be skipped just because the summary session log below
-     considers this session too short to record.
+    Finalizes the raw reading-history segment at the same points as session
+    endings: close, tab exit, inactivity timeout, or book switch.
+
+    Called before early returns because it independently handles open segments.
     */
     if (typeof closeHistorySegment === "function") closeHistorySegment();
 
@@ -298,14 +251,10 @@ function toggleBookContextMenuFlyout(event, bookIndexId) {
     const menu = document.getElementById("book-context-menu");
 
     /*
-     The "Estimate Completion Date" row only makes sense for books that are
-     marked read but are missing a completedDate (older completions from
-     before that field existed) - showing it unconditionally would just be
-     a dead action for every other book. Toggled here rather than baked
-     into static HTML since it depends on which book's menu was opened.
-     "Clear Completion Date" is the mirror image - only useful when a date
-     is actually set, regardless of read status (a manually-edited date on
-     an unread book should still be clearable).
+    The "Estimate Completion Date" action only applies to read books missing a
+    completedDate, such as older records from before that field existed.
+    "Clear Completion Date" is shown whenever a date exists, regardless of read
+    status, so manually added dates can always be removed.
     */
     const targetBookObj = loadedBooksMemory.find((b) => b.id === bookIndexId);
     const backfillRow = document.getElementById("context-item-backfill-completion");
@@ -380,14 +329,6 @@ function triggerContextAction(actionKey) {
     } else if (actionKey === 'metadata' || actionKey === 'stats') {
         openBookDiagnosticsModal(targetBookObj, actionKey);
     } else if (actionKey === 'group') {
-        /*
-         Previously this asked the user to type a raw numeric group ID,
-         which is an internal database key never shown anywhere in the UI —
-         there was no way for a user to actually know which number
-         corresponded to which group. This now lists the existing group
-         names (and their real IDs) so the prompt is actually answerable,
-         and validates the entered ID before using it.
-        */
         if (loadedGroupsMemory.length === 0) {
             alert("No groups exist yet. Create one first with \"📁 New Group\".");
             return;
@@ -416,13 +357,9 @@ function triggerContextAction(actionKey) {
 }
 
 /*
- Shared refresh path for every completion-date action (edit, clear, and
- the existing per-book estimate). Reloads loadedBooksMemory from
- IndexedDB so the book list/context menu reflect the change immediately,
- and - if the stats panel happens to be open right now - also re-runs
- showStatsViewState() so the completion-date-derived stats (books read
- count, completion timeline, etc.) update without the user having to
- navigate away and back.
+ Shared refresh path for completion-date actions (edit, clear, and estimate).
+ Reloads loadedBooksMemory and refreshes the open stats view if needed, so
+ completion-based stats update without requiring navigation away and back.
 */
 function refreshLibraryAndVisibleStats() {
     fetchLocalLibrary();
@@ -441,11 +378,6 @@ function openCompletionDateModal(bookObj) {
     const dateInput = document.getElementById("completion-date-input");
 
     idField.value = bookObj.id;
-    /* <input type="date"> expects YYYY-MM-DD in local terms. Pre-fill with
-       the book's existing completedDate if it has one, otherwise leave the
-       field blank rather than defaulting to today, so an empty field
-       clearly means "no date chosen yet" rather than silently implying
-       today's date. */
     dateInput.value = bookObj.completedDate
         ? toDateInputValue(new Date(bookObj.completedDate))
         : "";

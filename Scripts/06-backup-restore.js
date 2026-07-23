@@ -2,15 +2,13 @@
 // BACKUP: EXPORT / IMPORT ENTIRE LIBRARY AS JSON
 // =================================================================
 /*
- The backup file is deliberately a COMPLETE mirror of every local store
- plus the app's localStorage settings keys - not just books/groups - so it
- doubles as an offline-capable equivalent to Hard Pull/Hard Push (see
- 19-danger-zone.js): if there's no internet, or the user isn't signed in
- to cloud sync at all, this JSON file is the only way to move a full
- library (including notes and tags) between devices or recover from a
- wipe. Whenever a new synced data type is added to the app, it should be
- added here too, the same way it must be added to the Hard Pull/Push
- checklists in 19-danger-zone.js.
+ The backup file mirrors all local stores and relevant localStorage settings,
+ not just books and groups. It acts as an offline equivalent of Hard
+ Pull/Hard Push, allowing full library migration or recovery without cloud
+ access.
+
+ Any new synced data type added to the app should also be added here and to
+ the Hard Pull/Push checklists in 19-danger-zone.js.
 */
 // =================================================================
 // BACKUP: EXPORT (preserves EPUB files, notes, tags, and settings)
@@ -48,11 +46,9 @@ async function exportLibraryToJSON() {
     })
   );
 
-  // Settings/preferences: the same localStorage-backed values mirrored to
-  // Firestore by pushNoteSettingsToCloud() in 15-firebase-sync.js, plus the
-  // reader/library interface config (theme, font, hidden buttons, etc.)
-  // that's never synced to the cloud at all - so a local-only backup is
-  // the only way to carry those settings across devices too.
+// Settings/preferences: includes values mirrored to Firestore by
+// pushNoteSettingsToCloud() and local-only reader/library UI settings such as theme, font, and hidden buttons.
+// Backup preserves both so settings can transfer between devices even when they are not cloud-synced.
   const settings = {
     userConfig: safeParseLocalStorageJSON(Config.Db.USER_CONFIG_STORAGE_KEY),
     collapsedNoteTagKeys: safeParseLocalStorageJSON(Config.Db.COLLAPSED_NOTE_TAG_KEYS_STORAGE_KEY),
@@ -158,12 +154,9 @@ function importLibraryFromJSON(event) {
         }
 
         alert("Library restored successfully! Reloading to apply restored settings…");
-        // A reload (rather than just fetchLocalLibrary()) ensures restored
-        // localStorage settings - theme, font, hidden reader buttons, note
-        // tag layout - are actually picked back up, since those are only
-        // read once on page load (see loadSavedUserInterfaceSettings() in
-        // 10-reader-controls.js and the collapsedNoteTagKeys initializer in
-        // 16-notes.js).
+        // A reload ensures restored localStorage settings are picked up, since
+        // theme, font, hidden reader buttons, note tag layout, and similar settings
+        // are only initialized during page load.
         setTimeout(() => window.location.reload(), 600);
       };
       transaction.onerror = () => {
