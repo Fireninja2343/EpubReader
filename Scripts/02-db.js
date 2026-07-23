@@ -2,11 +2,6 @@
 // DATABASE MANAGEMENT PERSISTENCE CORE
 // -----------------------------------------------------------------
 function initIndexedDB() {
-  /*
-   Bumped from 1 to 2 to add the notes/noteGroups stores below. Existing
-   users on version 1 will have onupgradeneeded fire once, which only adds
-   the two new stores and leaves books/groups (and their data) untouched.
-  */
   const request = indexedDB.open(DB_NAME, 2);
   request.onupgradeneeded = (e) => {
     const database = e.target.result;
@@ -134,21 +129,17 @@ function saveBookToDatabase(title, coverData, binaryData, analysisMeta = {}) {
       lastOpened: null,
       completedDate: null,
       totalSessions: 0,
-      /* Real reading-session log - see startReadingSession()/endReadingSession()
-         in 09-stats-and-context-menu.js. Kept separate from totalSessions
-         above (which just counts reader launches) so average session
-         length can be computed from actual engaged reading time instead of
-         from "time spent / times opened". */
+      /* Real reading-session log (see startReadingSession()/endReadingSession()
+         in 09-stats-and-context-menu.js). Separate from totalSessions above
+         (which just counts reader launches) so average session length uses
+         actual engaged reading time, not "time spent / times opened". */
       readingSessions: [],
-      /* Raw per-session activity log powering the reading-activity calendar
-         heatmap in the stats view - see 13-reading-history.js and
-         upsertReadingHistoryEntry() below. Kept separate from readingSessions
-         above: readingSessions stores a fully-closed session summary
-         (duration + estimated pages), while readingHistory stores the raw
-         {startTimestamp, endTimestamp, secondsSpent, chapterStart,
-         chapterEnd} data an in-progress session is periodically flushed
-         into, so pages/day and other derived stats can be computed later
-         without ever storing a derived value here. */
+      /* Raw per-session activity log powering the reading-activity heatmap
+         (13-reading-history.js, upsertReadingHistoryEntry() below).
+         readingSessions stores closed-session summaries; readingHistory
+         stores the raw {startTimestamp, endTimestamp, secondsSpent,
+         chapterStart, chapterEnd} an in-progress session flushes into, so
+         pages/day etc. can be derived later without storing a derived value. */
       readingHistory: [],
     };
     store.add(entry).onsuccess = (e) => {
@@ -261,46 +252,30 @@ function estimateCompletionDate(book) {
 }
 
 /*
- -----------------------------------------------------------------
  GENERIC FIELD-BACKFILL MIGRATION PRIMITIVE
- The sync system (11-firebase-sync.js) relies on every synced record
- having a lastModified timestamp to decide which side of a local/cloud
- conflict is newer - see pullInitialSyncFromCloud(). Older records (books,
- groups, notes, note tags created before lastModified was stamped at
- write time) may not have one, and a record with no lastModified reads as
- lastModified 0 - the oldest possible value - which is BY DESIGN what lets
- a genuinely newer copy on the other side win. But two records that both
- have no lastModified are indistinguishable from "tied," which is exactly
- the ambiguous case worth resolving once, locally, rather than leaving
- forever.
+ The sync system (11-firebase-sync.js) needs every synced record to have
+ a lastModified timestamp to resolve local/cloud conflicts - a record
+ with none reads as 0 (oldest possible), which by design lets a genuinely
+ newer copy win. But two records that both lack one are indistinguishable
+ from "tied" - worth resolving once, locally, rather than leaving forever.
 
- backfillMissingField() is a single, reusable implementation of that
- backfill, parameterized so it works for any store and any field rather
- than needing one hand-written migration function per data type (the
- pattern migrateMissingCompletionDates() below and
- migrateMissingBookMetadata() in 06-epub-reader.js both predate this and
- duplicate their own scan-and-backfill loop - this is the generalized
- version future migrations should call into instead of copying that
- pattern again).
+ backfillMissingField() is one reusable implementation of that backfill,
+ parameterized by store/field so future migrations call into this instead
+ of writing their own scan-and-backfill loop (migrateMissingCompletionDates()
+ below and migrateMissingBookMetadata() in 06-epub-reader.js predate this
+ and still duplicate that pattern).
 
  Parameters:
-   storeName    - which IndexedDB object store to scan
-   isMissing(record)   -> true if this record needs backfilling
-   computeValue(record) -> the value to assign for the missing field
-   fieldName    - property name to set with computeValue()'s result
-   pushFn(record)  - optional; called (fire-and-forget, matching every
-                     other push call site in this codebase) once per
-                     backfilled record so the cloud picks up the new
-                     value too, not just this device
+   storeName            - which IndexedDB store to scan
+   isMissing(record)     -> true if this record needs backfilling
+   computeValue(record)  -> value to assign for the missing field
+   fieldName            - property to set
+   pushFn(record)        - optional, fire-and-forget cloud push per
+                           backfilled record
 
- Resolves to the number of records backfilled, so a caller can log or
- surface a count the same way migrateMissingCompletionDates() already does.
- Only ever touches records that are actually missing the field - this is
- a no-op (zero writes) on every call after the first migration for a
- given store/field, so it's always safe and cheap to call unconditionally
- on every load rather than needing its own "have I already migrated"
- flag - the emptiness of what it finds to backfill IS that flag.
- -----------------------------------------------------------------
+ Resolves to the count backfilled. Only touches records missing the
+ field, so it's a no-op after the first run - safe to call unconditionally
+ on every load with no separate "already migrated" flag needed.
 */
 function backfillMissingField(storeName, isMissing, computeValue, fieldName, pushFn) {
   return new Promise((resolve) => {
@@ -441,27 +416,9 @@ function migrateSingleBookCompletionDate(bookId) {
  out outright. The migration functions above are left untouched by this.
 */
 function setBookCompletionDate(bookId, completedDateValue) {
-  return new Promise((resolve) => {
-    const transaction = db.transaction([STORE_BOOKS], "readwrite");
-    const store = transaction.objectStore(STORE_BOOKS);
-    let updatedRecord = null;
-    store.get(bookId).onsuccess = (e) => {
-      const record = e.target.result;
-      if (record) {
-        record.completedDate = completedDateValue;
-        record.lastModified = new Date().getTime();
-        store.put(record);
-        updatedRecord = record;
-      }
-    };
-    transaction.oncomplete = () => {
-      if (updatedRecord && typeof pushBookMetadataToCloud === "function") {
-        pushBookMetadataToCloud(updatedRecord);
-      }
-      resolve(!!updatedRecord);
-    };
-    transaction.onerror = () => resolve(false);
-  });
+  return updateBookRecord(bookId, (record) => {
+    record.completedDate = completedDateValue;
+  }).then((record) => !!record);
 }
 
 /*
@@ -618,10 +575,16 @@ function upsertReadingHistoryEntry(bookId, entry) {
     };
     transaction.oncomplete = () => {
       if (updatedRecord && typeof pushBookMetadataToCloud === "function") {
-        pushBookMetadataToCloud(updatedRecord);
+        const now = Date.now();
+        const last = lastCloudProgressPush[bookId] || 0;
+        if (now - last >= CLOUD_PROGRESS_PUSH_INTERVAL_MS) {
+          lastCloudProgressPush[bookId] = now;
+          pushBookMetadataToCloud(updatedRecord);
+        }
       }
       resolve(!!updatedRecord);
     };
+    
     transaction.onerror = () => resolve(false);
   });
 }

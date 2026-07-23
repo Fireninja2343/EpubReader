@@ -1,80 +1,38 @@
 /*
- =================================================================
  FIREBASE CLOUD SYNC MODULE
- IndexedDB remains the source of truth for offline use. This module
- mirrors book metadata (including reading progress, reading sessions,
- reading history, and sort order), groups, notes, note tags, and the
- small set of Notes-page settings/preferences to Firestore, and stores
- the actual .epub binaries as chunked base64 text also inside Firestore
- (avoiding the need for Firebase Storage or a billing plan).
+ IndexedDB is the source of truth. This mirrors book metadata (progress,
+ sessions, history, sort order), groups, notes, note tags, and Notes-page
+ settings to Firestore, storing .epub binaries as chunked base64 text
+ (avoids needing Firebase Storage/a billing plan).
 
- SYNC MODEL (deliberately NOT real-time):
- - On sign-in (or on every fresh page load while already signed in), one
-   catch-up pass runs: anything new on the cloud is pulled down, and
-   anything that only exists locally is pushed up.
- - While reading, progress is pushed to the cloud at most once every 20
-   seconds per book (see the throttle logic around lastCloudProgressPush),
-   no matter how much scrolling happens or how often progress updates are
-   requested.
- - Closing a book ("Back to Library") forces one final push so the last
-   few seconds of a session aren't lost to that 20s throttle window —
-   that forced push is the only thing allowed to bypass the throttle, and
-   it has its own short minimum gap so it can't double-push.
- - There is deliberately no live listener and no push triggered by
-   tab-switching or backgrounding anymore — both were sources of
-   uncapped, un-throttled Firestore reads/writes just from having the app
-   open in a tab. As a result, changes made on another device won't show
-   up here until a reload or re-sign-in happens — a real trade-off, made
-   on purpose to keep background cost at zero.
- ================================================================= */
+ SYNC MODEL (deliberately not real-time):
+ - Sign-in / fresh page load while signed in: one catch-up pass - pull
+   anything new from the cloud, push anything local-only.
+ - While reading, progress pushes at most once per 20s per book (throttle
+   around lastCloudProgressPush). Closing a book forces one final push so
+   the trailing few seconds aren't lost to that window.
+ - No live listener, no push on tab-switch/backgrounding - both caused
+   uncapped Firestore reads/writes just from having the tab open. Trade-off:
+   another device's changes won't appear here until reload/re-sign-in.
+*/
 
-// Reuses the single copy of the config already defined in 00-config.js
-// instead of keeping a second, independently-hardcoded copy here that could
-// silently drift out of sync with it.
+// Reuses the config already in 00-config.js rather than a second copy that could drift.
 firebase.initializeApp(Config.firebaseConfig);
 const fbAuth = firebase.auth();
 const fbDb = firebase.firestore();
 
 /*
- Firestore's own offline-persistence cache (enablePersistence()) is
- intentionally left disabled here. That cache keeps a local queue of
- un-sent writes across reloads, and if writes keep failing for any reason,
- that queue can grow without ever fully draining — every reload would then
- replay the backlog and immediately flood the write stream again. Since
- the app already has IndexedDB as its durable local store, Firestore
- doesn't need a second offline cache layered on top.
+ Firestore's offline-persistence cache is intentionally left disabled -
+ IndexedDB is already the durable local store, and a stuck write queue in
+ that cache would replay and flood the write stream on every reload.
 
- Firestore also caps a single document at roughly 1MiB. EPUB files are
- stored as base64 text split across several small documents in a
- "fileChunks" subcollection so that cap is never hit. 700,000 characters
- per chunk keeps each one safely under the limit.
+ Firestore caps a document at ~1MiB, so EPUB files are split into
+ 700,000-char base64 chunks across a "fileChunks" subcollection instead.
 */
 const FILE_CHUNK_SIZE = Config.Sync.FILE_CHUNK_SIZE;
 
 let currentUser = null;
 
-/*
- Reads every record in a store straight from IndexedDB rather than
- whatever in-memory cache (loadedBooksMemory, loadedGroupsMemory, etc.)
- happens to mirror it. Needed here specifically because
- pullInitialSyncFromCloud() can run before those caches are populated for
- the first time in a session (right after sign-in on a fresh page load) -
- trusting a still-empty cache in that window was exactly what let cloud
- data silently overwrite books/groups/notes/tags that genuinely existed
- locally. A near-identical helper (getAllFromLocalStore) also lives in
- 15-danger-zone.js for Hard Push/Soft Sync, but that file loads AFTER this
- one, so it isn't available yet when sign-in fires this function - kept as
- its own small copy here rather than introducing a load-order dependency
- the wrong direction.
-*/
-function getAllFromLocalStoreForSync(storeName) {
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction([storeName], "readonly");
-    const req = tx.objectStore(storeName).getAll();
-    req.onsuccess = () => resolve(req.result || []);
-    req.onerror = () => reject(req.error);
-  });
-}
 let booksListenerUnsub = null;
 let groupsListenerUnsub = null;
 let initialSyncInProgress = false;
@@ -194,30 +152,14 @@ function userDoc() {
 }
 
 /*
- -----------------------------------------------------------------
  PUSH RELIABILITY: retry queue + failure surfacing
- Every pushXToCloud() function below is called fire-and-forget in dozens
- of places throughout 02-db.js/12-notes.js (no `await`, no `.catch()`),
- which is fine when the write succeeds but previously meant any rejected
- promise became a silent unhandled rejection: the write just never
- happened, nothing told the user, and - since local lastModified had
- already advanced - nothing would retry it until the next full
- pullInitialSyncFromCloud() catch-up pass (sign-in/reload only).
-
- withPushRetry() wraps a push attempt so that:
-   - it never throws/rejects out to a fire-and-forget caller (every push
-     function's returned Promise still always resolves, exactly as
-     before - so no existing caller needs to change),
-   - a failure is logged clearly and surfaced via a small non-blocking
-     status indicator (see showCloudSyncFailureNotice() below) instead of
-     vanishing silently,
-   - the failed operation is retried automatically with a short backoff a
-     few times before being added to a durable-for-this-session retry
-     queue, which is drained the next time a push of the same kind
-     succeeds, on the next pullInitialSyncFromCloud() pass, and on a
-     regular interval - so a transient network blip self-heals instead of
-     waiting for the user to reload or re-sign-in.
- -----------------------------------------------------------------
+ Every pushXToCloud() is called fire-and-forget elsewhere (no await/catch),
+ so a rejected push used to fail silently with no retry until the next
+ full sign-in/reload sync. withPushRetry() wraps a push so it: never
+ throws to its fire-and-forget caller, logs failures and surfaces them via
+ a small status indicator (showCloudSyncFailureNotice()), and retries with
+ backoff a few times before queuing - drained on interval, on the next
+ sync pass, or whenever a same-kind push next succeeds.
 */
 let pendingCloudPushRetries = [];
 const PUSH_RETRY_IMMEDIATE_ATTEMPTS = 2; // quick retries before falling back to the queue
@@ -426,63 +368,29 @@ async function pushGroupToCloud(group) {
   });
 }
 
-// Writes lastModified into the local IndexedDB group record without
-// touching any other field - kept as its own small helper (rather than
-// folded into 03-groups.js's own edit functions, which this fix doesn't
-// otherwise need to touch) so every push path, present or future, can
-// call it the same way.
+// Writes lastModified into the local IndexedDB group record (and
+// loadedGroupsMemory cache) without touching any other field.
 function stampLocalGroupLastModified(groupId, lastModified) {
-  if (!db) return Promise.resolve();
-  return new Promise((resolve) => {
-    const tx = db.transaction([STORE_GROUPS], "readwrite");
-    const store = tx.objectStore(STORE_GROUPS);
-    store.get(groupId).onsuccess = (e) => {
-      const record = e.target.result;
-      if (record) {
-        record.lastModified = lastModified;
-        store.put(record);
-        const cached = loadedGroupsMemory && loadedGroupsMemory.find((g) => g.id === groupId);
-        if (cached) cached.lastModified = lastModified;
-      }
-    };
-    tx.oncomplete = resolve;
-    tx.onerror = () => resolve();
-  });
+  return stampLocalRecordLastModified(STORE_GROUPS, loadedGroupsMemory, groupId, lastModified);
 }
 
 /*
- -----------------------------------------------------------------
  NOTES / NOTE-TAGS / SETTINGS SYNC
- Same "IndexedDB stays the source of truth, Firestore is a mirror" model
- as books/groups above.
+ Same "IndexedDB is truth, Firestore mirrors it" model as books/groups.
 
- Local notes/tags previously had NO lastModified field at all (see
- 12-notes.js) - a timestamp was stamped only on the Firestore copy at push
- time, and pullInitialSyncFromCloud()'s comparison read the (always-zero)
- local value as `local.lastModified || 0`. Since the remote side always
- had a real timestamp from the last push, `remote >= local(0)` was true
- unconditionally, so the cloud copy won on every sign-in/reload catch-up
- pass even when the local copy was the newer edit and simply hadn't been
- pushed yet (or had failed to push - see the retry queue above). Fixed two
- ways together:
-   1. 12-notes.js now stamps record.lastModified = Date.now() at every
-      local create/edit write path (see updateNoteFields(), createNoteTag(),
-      updateNoteTag(), submitNoteEditorForm()'s create path, etc.).
-   2. As a second line of defense (covering any push triggered from
-      somewhere that predates that stamp, e.g. Hard Push/Soft Sync forced
-      pushes), a successful push here also writes the exact same stamped
-      timestamp back into the local record, via
-      stampLocalNoteLastModified()/stampLocalNoteTagLastModified() below -
-      analogous to stampLocalGroupLastModified() for groups above.
- Either fix alone closes the bug; both together mean it can't regress if
- only one of the two write paths is touched later.
- -----------------------------------------------------------------
+ Local notes/tags previously had no lastModified at all, so the pull
+ comparison's `local.lastModified || 0` always lost to a real remote
+ timestamp - the cloud copy won on every sync even when the local edit was
+ newer but simply hadn't pushed yet. Fixed two ways: 12-notes.js now
+ stamps lastModified on every local create/edit, and (belt-and-suspenders,
+ covering forced pushes from Hard Push/Soft Sync) a successful push here
+ also writes that same timestamp back locally via
+ stampLocalNoteLastModified()/stampLocalNoteTagLastModified() below.
 */
 async function pushNoteToCloud(note) {
   if (!currentUser || !note || note.id == null) return;
-  // Respects an existing note.lastModified (12-notes.js now stamps this at
-  // every local create/edit) rather than always minting a new one here -
-  // consistent with books/groups above.
+  // Respects an existing note.lastModified (12-notes.js stamps this on
+  // every local create/edit) rather than always minting a new one here.
   const stampedLastModified = note.lastModified || Date.now();
   const succeeded = await withPushRetry(`note #${note.id}`, async () => {
     logCloudWrite(`note #${note.id}`);
@@ -505,24 +413,12 @@ async function pushNoteToCloud(note) {
 }
 
 function stampLocalNoteLastModified(noteId, lastModified) {
-  if (!db) return Promise.resolve();
-  return new Promise((resolve) => {
-    const tx = db.transaction([STORE_NOTES], "readwrite");
-    const store = tx.objectStore(STORE_NOTES);
-    store.get(noteId).onsuccess = (e) => {
-      const record = e.target.result;
-      if (record) {
-        record.lastModified = lastModified;
-        store.put(record);
-        if (typeof loadedNotesMemory !== "undefined") {
-          const cached = loadedNotesMemory.find((n) => n.id === noteId);
-          if (cached) cached.lastModified = lastModified;
-        }
-      }
-    };
-    tx.oncomplete = resolve;
-    tx.onerror = () => resolve();
-  });
+  return stampLocalRecordLastModified(
+    STORE_NOTES,
+    typeof loadedNotesMemory !== "undefined" ? loadedNotesMemory : undefined,
+    noteId,
+    lastModified,
+  );
 }
 
 async function deleteNoteFromCloud(noteId) {
@@ -551,24 +447,12 @@ async function pushNoteTagToCloud(tag) {
 }
 
 function stampLocalNoteTagLastModified(tagId, lastModified) {
-  if (!db) return Promise.resolve();
-  return new Promise((resolve) => {
-    const tx = db.transaction([STORE_NOTE_GROUPS], "readwrite");
-    const store = tx.objectStore(STORE_NOTE_GROUPS);
-    store.get(tagId).onsuccess = (e) => {
-      const record = e.target.result;
-      if (record) {
-        record.lastModified = lastModified;
-        store.put(record);
-        if (typeof loadedNoteTagsMemory !== "undefined") {
-          const cached = loadedNoteTagsMemory.find((t) => t.id === tagId);
-          if (cached) cached.lastModified = lastModified;
-        }
-      }
-    };
-    tx.oncomplete = resolve;
-    tx.onerror = () => resolve();
-  });
+  return stampLocalRecordLastModified(
+    STORE_NOTE_GROUPS,
+    typeof loadedNoteTagsMemory !== "undefined" ? loadedNoteTagsMemory : undefined,
+    tagId,
+    lastModified,
+  );
 }
 
 async function deleteNoteTagFromCloud(tagId) {
@@ -655,34 +539,20 @@ async function pullInitialSyncFromCloud() {
      exist yet - same class of bug documented and fixed for Soft Sync's
      comparisons in 16-soft-sync.js.
     */
-    const localGroupsNow = await getAllFromLocalStoreForSync(STORE_GROUPS);
-    const localBooksNow = await getAllFromLocalStoreForSync(STORE_BOOKS);
+    const localGroupsNow = await getAllFromLocalStore(STORE_GROUPS);
+    const localBooksNow = await getAllFromLocalStore(STORE_BOOKS);
 
     /*
-     Groups previously had NO conflict resolution at all: every remote
-     group doc was written straight into IndexedDB unconditionally
-     (groupsStore.put(...) with no comparison), so a local rename/recolor
-     made moments before this ran - and not yet pushed - was silently
-     clobbered by whatever stale copy happened to be in the cloud. Fixed
-     to use the exact same three-way lastModified comparison already used
-     for books just below: download remote-only groups as-is, apply the
-     remote copy only if it's actually newer, otherwise push the local
-     copy up (covers both "local is newer" and "neither side has ever
-     been pushed, both read as 0" - in the latter case this pushes local's
-     copy, deliberately favoring the device the user is looking at rather
-     than leaving it ambiguous).
-
-     A local group is only trusted as "newer than any remote copy that has
-     a timestamp" once it actually has its own lastModified. 03-groups.js
-     now stamps this at the moment of local creation/rename/recolor (see
-     submitGroupModalForm()), and pushGroupToCloud()'s
-     stampLocalGroupLastModified() call is a second line of defense for
-     any push triggered from elsewhere (Hard Push/Soft Sync). A local
-     group with no lastModified at all (e.g. one created before this fix
-     shipped, never edited since) is treated as never-pushed-before, not
-     as "definitely newer" - avoiding an old un-timestamped local group
-     from wrongly overwriting a cloud copy that's actually the latest edit
-     made from a different device.
+     Groups previously had no conflict resolution - every remote doc was
+     written straight in unconditionally, so a recent local rename/recolor
+     could be clobbered by a stale cloud copy. Now uses the same three-way
+     lastModified comparison as books below: download remote-only groups
+     as-is, apply remote only if newer, otherwise push local up (also
+     covers "neither side ever pushed, both read 0" - favors the local
+     device rather than leaving it ambiguous). A group with no
+     lastModified at all (pre-fix, never edited since) is treated as
+     never-pushed rather than "definitely newer", so it can't wrongly
+     overwrite a genuinely newer cloud copy.
     */
     await new Promise((resolve) => {
       const tx = db.transaction([STORE_GROUPS], "readwrite");
@@ -738,36 +608,20 @@ async function pullInitialSyncFromCloud() {
     }
 
     /*
-     Notes/tags previously had a structural "cloud always wins" bug: local
-     records never carried a lastModified field at all (see 12-notes.js's
-     write paths before this fix), so `local.lastModified || 0` was always
-     literally 0, and remote always has a real timestamp from its last
-     push - meaning `remote > 0 >= local(0)` was true unconditionally,
-     every single time, regardless of which side was actually edited more
-     recently. A local edit made seconds before this ran (or one whose
-     push simply failed - see the retry queue above) would be silently
-     discarded in favor of a stale cloud copy on every sign-in/reload.
-
-     Fixed on both ends:
-       - 12-notes.js now stamps lastModified on every local note/tag
-         write, and pushNoteToCloud()/pushNoteTagToCloud() above stamp it
-         locally too after a successful push, so local.lastModified is a
-         real, meaningful value from now on rather than always-absent.
-       - The comparison below switched from `>=` to `>` for the
-         remote-wins branch, so a genuine tie (both sides read 0, e.g. an
-         old local record from before this fix that hasn't been edited
-         since) doesn't get overwritten purely by luck of which side the
-         comparison happens to favor - see the loop below that pushes the
-         local copy up in that case instead, exactly mirroring the groups
-         fix above.
-       - The remote-wins write now includes lastModified in the local
-         record it writes (previously omitted entirely), so the local
-         copy actually reflects when it was last synced instead of
-         reading 0 forever and being vulnerable to the same bug again on
-         the very next pull.
+     Notes/tags previously had a "cloud always wins" bug: local records
+     had no lastModified at all, so `local(0)` always lost to a real
+     remote timestamp regardless of which side was actually newer - a
+     recent local edit (or one whose push failed) got silently discarded
+     on every sign-in/reload. Fixed: 12-notes.js now stamps lastModified
+     on every local write (and pushNoteToCloud()/pushNoteTagToCloud()
+     mirror it back locally after a push); the remote-wins comparison
+     uses strict `>` so a genuine 0-0 tie pushes local up instead
+     (mirroring the groups fix above) rather than being overwritten by
+     luck; and the remote-wins write now actually includes lastModified
+     locally instead of omitting it.
     */
-    const localNotes = await getAllFromLocalStoreForSync(STORE_NOTES);
-    const localNoteTags = await getAllFromLocalStoreForSync(STORE_NOTE_GROUPS);
+    const localNotes = await getAllFromLocalStore(STORE_NOTES);
+    const localNoteTags = await getAllFromLocalStore(STORE_NOTE_GROUPS);
     const remoteNoteIds = new Set(remoteNotesSnap.docs.map((d) => Number(d.id)));
     const remoteNoteTagIds = new Set(remoteNoteTagsSnap.docs.map((d) => Number(d.id)));
 

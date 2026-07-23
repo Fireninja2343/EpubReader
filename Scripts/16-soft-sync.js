@@ -1,34 +1,25 @@
 /*
- =================================================================
  SOFT PULL / SOFT PUSH MODULE
  Interactive, review-before-you-commit counterparts to Hard Pull/Hard
- Push (15-danger-zone.js). Where Hard Pull/Push are all-or-nothing
- (discard everything on one side, replace it wholesale), Soft Pull/Push:
+ Push (15-danger-zone.js). Where those are all-or-nothing, Soft Pull/Push:
 
-   1. Compare local vs. cloud for every synced data type WITHOUT writing
-      anything, producing a flat list of individual "operations" -
+   1. Compare local vs. cloud for every synced data type without writing
+      anything, producing a flat list of "operations" -
       { type, category, id, label, apply() } - classified as an
       addition/update/removal.
-   2. Show that list inside a modal, grouped by category, with per-row
-      status (pending/running/done/error) and running counts.
-   3. Let the user run a subset (Apply All / Apply Additions / Apply
-      Updates / Apply Removals) - each click walks the matching
-      operations in order, applying each one via the SAME per-item
-      push/pull/delete primitives Hard Pull/Push and the normal
-      incremental sync already use, so the actual write path never
-      diverges from the rest of the app.
-   4. Keep the modal open throughout, update rows live, and support
-      pause/cancel between operations (cooperative - never aborts an
-      operation that's already in flight, only skips ones that haven't
-      started yet).
+   2. Show that list in a modal, grouped by category, with per-row status
+      (pending/running/done/error) and running counts.
+   3. Let the user run a subset (Apply All / Additions / Updates /
+      Removals) - each applies via the SAME per-item push/pull/delete
+      primitives Hard Pull/Push and normal incremental sync use, so the
+      write path never diverges.
+   4. Keep the modal open, update rows live, support pause/cancel between
+      operations (cooperative - never aborts one already in flight).
 
- EXTENSIBILITY (requirement #5/#6): every data type participates through
- one entry in SYNC_TYPE_REGISTRY below. Adding a new synced data type to
- Soft Pull/Push in the future means adding one registry entry - the
- comparison engine, the modal renderer, and the apply-queue runner are
- all generic over the registry and never mention a specific data type by
- name outside of it.
- =================================================================
+ EXTENSIBILITY: every data type participates through one entry in
+ SYNC_TYPE_REGISTRY below. Adding a new type means adding one registry
+ entry - the comparison engine, renderer, and apply-queue runner are
+ generic over the registry.
 */
 
 // -----------------------------------------------------------------
@@ -39,46 +30,39 @@
 // with identical content), and how to apply each kind of change. This is
 // the single place a future data type needs to be added.
 // -----------------------------------------------------------------
+// Shared shape behind every registry entry's fetchRemote(): read every
+// doc in a Firestore collection, tag each with its numeric id.
+async function fetchRemoteCollection(collectionFn) {
+  const snap = await collectionFn().get();
+  return snap.docs.map((d) => ({ id: Number(d.id), ...d.data() }));
+}
+
 /*
  Entry shape:
-   key            - stable id, e.g. "books"
-   label          - display name, e.g. "Books"
-   icon           - emoji shown in the group header
-   fetchLocal()   -> Promise<array of local records (each must have an `id`)>.
-                    Reads IndexedDB directly (see getAllFromLocalStore()
-                    below) rather than an in-memory cache, since those
-                    caches aren't guaranteed populated yet when this runs -
-                    see the comment on the books entry's fetchLocal below.
-   fetchRemote()  -> Promise<array of remote records (each must have an `id`)>
-   describe(rec)  -> short human label for one record, e.g. book title
-   fieldsToCompare(rec) -> plain object of just the fields that matter for
-                    equality, pulled from either a local or remote record
-                    shape - used so a differing lastModified alone (with
-                    otherwise identical content) doesn't get flagged.
-   applyAddition(record)  -> Promise, create the missing side
+   key/label/icon      - id, display name, group-header emoji
+   fetchLocal()        -> Promise<local records (each needs an `id`)>.
+                         Reads IndexedDB directly (getAllFromLocalStore),
+                         not an in-memory cache, since those aren't
+                         guaranteed populated yet when this runs.
+   fetchRemote()       -> Promise<remote records (each needs an `id`)>
+   describe(rec)       -> short human label for one record
+   fieldsToCompare(rec) -> just the fields that matter for equality, so a
+                         differing lastModified alone doesn't get flagged
+   applyAddition(record)      -> Promise, create the missing side
    applyUpdate(local, remote) -> Promise, overwrite one side with the other
-   applyRemoval(id)       -> Promise, delete from the side that has it
- Soft Pull and Soft Push reuse the exact same registry; only the
- direction (which side is "source of truth" for additions/updates, and
- which side removals delete from) differs - see buildSyncPlan() below.
+   applyRemoval(id)           -> Promise, delete from the side that has it
+ Soft Pull and Soft Push reuse the same registry; only the direction
+ (which side is "source of truth") differs - see buildSyncPlan() below.
 */
 const SYNC_TYPE_REGISTRY = [
   {
     key: "books",
     label: "Books",
     icon: "📚",
-    // Reads IndexedDB directly rather than trusting loadedBooksMemory: that
-    // in-memory cache is only ever as fresh as the last fetchLocalLibrary()
-    // call, and 11-firebase-sync.js's own pullInitialSyncFromCloud() has a
-    // documented race where it can run before that cache is populated (see
-    // its comment above the equivalent notes/tags read). IndexedDB itself
-    // is the actual source of truth per this app's architecture, so
-    // comparisons here should never be fooled by a stale/empty cache.
+    // See "Entry shape" comment above for why this reads IndexedDB
+    // directly rather than trusting loadedBooksMemory.
     fetchLocal: () => getAllFromLocalStore(STORE_BOOKS),
-    fetchRemote: async () => {
-      const snap = await booksCollection().get();
-      return snap.docs.map((d) => ({ id: Number(d.id), ...d.data() }));
-    },
+    fetchRemote: () => fetchRemoteCollection(booksCollection),
     describe: (rec) => rec.title || `Book #${rec.id}`,
     fieldsToCompare: (rec) => ({
       title: rec.title ?? null,
@@ -104,24 +88,18 @@ const SYNC_TYPE_REGISTRY = [
       readingSessions: JSON.stringify(rec.readingSessions ?? []),
       readingHistory: JSON.stringify(rec.readingHistory ?? []),
       /*
-       File-upload completeness signal (claim #4 fix): book metadata can
-       match perfectly on both sides even when the actual EPUB binary
-       upload was interrupted partway through pushBookFileToCloud() -
-       chunkCount is only ever written as that function's LAST step, once
-       every chunk has actually landed (see downloadBookFromCloud()'s own
-       `if (!remoteMeta.chunkCount) return;` guard, which treats a
-       missing/falsy chunkCount as "not ready to trust yet"). Without this
-       field, an interrupted upload would show as "already in sync" here
-       with nothing prompting a re-push.
+       File-upload completeness signal: book metadata can match perfectly
+       on both sides even when the EPUB binary upload was interrupted
+       partway through pushBookFileToCloud() - chunkCount is only written
+       as that function's LAST step (see downloadBookFromCloud()'s
+       `if (!remoteMeta.chunkCount) return;` guard). Without this field,
+       an interrupted upload would show as "already in sync".
 
-       A local record reports simply "do I have file data at all" (true/
-       false) since local never stores a chunkCount of its own - it isn't
-       a chunked format locally, only in Firestore. A remote record
-       reports "does chunkCount look complete" (true/false). Comparing
-       those two booleans catches exactly the mismatch that matters: local
-       has a file, but the cloud's chunkCount says its copy isn't usable
-       yet - without needing to actually re-encode the local file to
-       compute its *exact* expected chunk count just to check this.
+       Local reports simply "do I have file data at all" (local isn't
+       chunked, only Firestore is); remote reports "does chunkCount look
+       complete". Comparing the two booleans catches exactly the
+       mismatch that matters without re-encoding the file to compute an
+       exact expected chunk count.
       */
       hasUsableFile: rec.fileData !== undefined ? !!rec.fileData : !!rec.chunkCount,
     }),
@@ -180,10 +158,7 @@ const SYNC_TYPE_REGISTRY = [
     label: "Collections / Groups",
     icon: "🗂️",
     fetchLocal: () => getAllFromLocalStore(STORE_GROUPS),
-    fetchRemote: async () => {
-      const snap = await groupsCollection().get();
-      return snap.docs.map((d) => ({ id: Number(d.id), ...d.data() }));
-    },
+    fetchRemote: () => fetchRemoteCollection(groupsCollection),
     describe: (rec) => rec.name || `Group #${rec.id}`,
     fieldsToCompare: (rec) => ({
       name: rec.name ?? null,
@@ -216,10 +191,7 @@ const SYNC_TYPE_REGISTRY = [
     label: "Notes",
     icon: "📝",
     fetchLocal: () => getAllFromLocalStore(STORE_NOTES),
-    fetchRemote: async () => {
-      const snap = await notesCollection().get();
-      return snap.docs.map((d) => ({ id: Number(d.id), ...d.data() }));
-    },
+    fetchRemote: () => fetchRemoteCollection(notesCollection),
     describe: (rec) => (rec.selectedText ? rec.selectedText.slice(0, 40) : rec.comment ? rec.comment.slice(0, 40) : `Note #${rec.id}`),
     fieldsToCompare: (rec) => ({
       selectedText: rec.selectedText ?? "",
@@ -255,10 +227,7 @@ const SYNC_TYPE_REGISTRY = [
     label: "Note Tags",
     icon: "🏷️",
     fetchLocal: () => getAllFromLocalStore(STORE_NOTE_GROUPS),
-    fetchRemote: async () => {
-      const snap = await noteTagsCollection().get();
-      return snap.docs.map((d) => ({ id: Number(d.id), ...d.data() }));
-    },
+    fetchRemote: () => fetchRemoteCollection(noteTagsCollection),
     describe: (rec) => rec.name || `Tag #${rec.id}`,
     fieldsToCompare: (rec) => ({
       name: rec.name ?? null,
@@ -365,9 +334,9 @@ const SYNC_TYPE_REGISTRY = [
 // SMALL LOCAL-DB HELPERS (generic put/delete, reused across registry
 // entries above instead of each one opening its own transaction)
 // -----------------------------------------------------------------
-// getAllFromLocalStore() itself lives in 15-danger-zone.js (loaded before
-// this file) and is shared as-is - see its definition there for why it
-// reads IndexedDB directly instead of the in-memory caches.
+// getAllFromLocalStore() itself lives in 10-utils.js and is shared as-is -
+// see its definition there for why it reads IndexedDB directly instead
+// of the in-memory caches.
 function putLocalRecord(storeName, record) {
   return new Promise((resolve, reject) => {
     const tx = db.transaction([storeName], "readwrite");

@@ -54,12 +54,7 @@ async function computeEpubWordStats(zip, opfDoc, opfPath) {
 */
 async function analyzeEpubFile(fileData) {
   const zip = await JSZip.loadAsync(fileData);
-  const containerFile = await zip.file("META-INF/container.xml").async("string");
-  const parser = new DOMParser();
-  const containerDoc = parser.parseFromString(containerFile, "text/xml");
-  const opfPath = containerDoc.querySelector("rootfile").getAttribute("full-path");
-  const opfFile = await zip.file(opfPath).async("string");
-  const opfDoc = parser.parseFromString(opfFile, "text/xml");
+  const { opfDoc, opfPath } = await openEpubContainer(zip);
   return computeEpubWordStats(zip, opfDoc, opfPath);
 }
 
@@ -111,9 +106,8 @@ async function ensureBookMetadataCached(book) {
 /*
  Runs ensureBookMetadataCached() across the whole library. Books are
  processed one at a time rather than in parallel, for the same reason
- handleFileImport() processes a batch import sequentially - unzipping
- several potentially large EPUBs at once risks spiking memory on a big
- library. metadataMigrationInProgress guards against overlapping runs,
+ handleFileImport() processes a batch import sequentially.
+ metadataMigrationInProgress guards against overlapping runs,
  since this gets triggered both after every fetchLocalLibrary() call and
  explicitly (awaited) when the stats view opens.
 */
@@ -156,12 +150,7 @@ async function handleFileImport(event) {
 
         try {
             const zip = await JSZip.loadAsync(file);
-            const containerFile = await zip.file("META-INF/container.xml").async("string");
-            const parser = new DOMParser();
-            const containerDoc = parser.parseFromString(containerFile, "text/xml");
-            const opfPath = containerDoc.querySelector("rootfile").getAttribute("full-path");
-            const opfFile = await zip.file(opfPath).async("string");
-            const opfDoc = parser.parseFromString(opfFile, "text/xml");
+            const { opfDoc, opfPath, baseDir } = await openEpubContainer(zip);
 
             const title = opfDoc.querySelector("title")?.textContent || file.name.replace(".epub", "");
             let coverBase64 = null;
@@ -177,7 +166,6 @@ async function handleFileImport(event) {
                 const itemNode = opfDoc.getElementById(coverId);
                 if (itemNode) {
                     const relCoverPath = itemNode.getAttribute("href");
-                    const baseDir = opfPath.substring(0, opfPath.lastIndexOf("/")) + "/";
                     const fullCoverPath = normalizePath(baseDir + relCoverPath);
                     const imgFile = zip.file(fullCoverPath);
                     if (imgFile) {
@@ -186,34 +174,8 @@ async function handleFileImport(event) {
                     }
                 }
             }
-
-            /*
-             Word/page/chapter counting reuses the zip and opfDoc already
-             parsed above instead of unzipping the file a second time. This
-             is the one-time cost that lets every later screen (stats table,
-             per-book diagnostics) just read cached numbers off the book
-             record instead of reparsing the EPUB.
-            */
             const analysisMeta = await computeEpubWordStats(zip, opfDoc, opfPath);
 
-            /*
-             The parsed book is saved through the shared saveBookToDatabase()
-             helper instead of writing directly to IndexedDB here. That
-             shared helper is responsible for setting default fields like
-             isRead and lastModified, and for kicking off the cloud push of
-             both the metadata and the file itself. Writing straight to
-             IndexedDB in this function would silently skip all of that.
-            */
-            /*
-             saveBookToDatabase() now returns a Promise that resolves once the
-             IndexedDB write actually finishes (see 02-db.js). Previously this
-             wrapped it in a Promise that resolved immediately regardless, so
-             the "process files one at a time" sequencing described above
-             wasn't real: every file's IndexedDB write was fired off and the
-             loop moved on to the next file's parsing before it finished,
-             which could make sortOrder (based on loadedBooksMemory.length at
-             call time) collide across a batch import.
-            */
             await saveBookToDatabase(title, coverBase64, file, analysisMeta);
 
         } catch (err) {
@@ -261,17 +223,7 @@ async function launchEpubReader(bookObject) {
 
   try {
     activeZipInstance = await JSZip.loadAsync(bookObject.fileData);
-    const containerFile = await activeZipInstance
-      .file("META-INF/container.xml")
-      .async("string");
-    const parser = new DOMParser();
-    const containerDoc = parser.parseFromString(containerFile, "text/xml");
-    const opfPath = containerDoc
-      .querySelector("rootfile")
-      .getAttribute("full-path");
-    const opfFile = await activeZipInstance.file(opfPath).async("string");
-    const opfDoc = parser.parseFromString(opfFile, "text/xml");
-    const baseDir = opfPath.substring(0, opfPath.lastIndexOf("/")) + "/";
+    const { opfDoc, baseDir } = await openEpubContainer(activeZipInstance);
 
     const manifestItems = {};
     opfDoc.querySelectorAll("manifest > item").forEach((item) => {

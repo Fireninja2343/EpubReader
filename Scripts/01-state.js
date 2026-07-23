@@ -55,22 +55,10 @@ function changeLibraryViewMode(modeValue) {
   }
 }
 
-/*
- =================================================================
+/*=================================================================
  HARD RELOAD
  Mirrors what Ctrl+Shift+R does in a desktop browser, primarily for mobile
- where that shortcut doesn't exist: drop the Service Worker's cache(s),
- unregister the worker itself so a fresh one is fetched from the network on
- next load, and then force a network-refetch of the page rather than
- letting the browser serve it from its own HTTP cache.
-
- IndexedDB (the library, notes, reading progress, etc.) is deliberately
- left completely untouched - this only clears *cached app resources*
- (HTML/CSS/JS/the PWA's asset cache), never any user data.
-
- Each step is wrapped so a browser that doesn't support one API (e.g. no
- caches API, or no Service Worker at all) still falls through to the next
- step instead of throwing and aborting the whole reload.
+ where that shortcut doesn't exist.
  ================================================================= */
 async function hardReloadApp() {
   const btn = document.getElementById("btn-hard-reload");

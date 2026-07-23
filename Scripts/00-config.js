@@ -7,6 +7,7 @@ const Config = {
     STORE_NOTE_GROUPS: "noteGroups",
     COLLAPSED_NOTE_TAG_KEYS_STORAGE_KEY: "EpubReader_CollapsedNoteTagKeys_v1",
     LAST_NOTE_TAGS_STORAGE_KEY: "EpubReader_LastNoteTagIds_v1",
+    USER_CONFIG_STORAGE_KEY: "EpubReader_UserConfig_v1",
   },
   AutoScroller: {
     AUTOSCROLL_DEBUG: false,
@@ -43,5 +44,8 @@ const Config = {
     messagingSenderId: "171569428425",
     appId: "1:171569428425:web:7e43e4deb49ab408cdda18",
     measurementId: "G-QB21V0K0KP",
+  },
+  Miscellaneous: {
+    DEFAULT_GROUP_COLOR: '#252538',
   }
 };

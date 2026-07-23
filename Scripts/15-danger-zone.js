@@ -1,59 +1,29 @@
 /*
- =================================================================
  DANGER ZONE / SYNC RECOVERY MODULE
  Three destructive, deliberately-hard-to-trigger operations, all built on
- top of the same reusable typed-confirmation modal:
+ the same reusable typed-confirmation modal:
 
-   1. clearLocalData()  - wipes every local store + localStorage app keys,
-      leaves the cloud untouched, then hard-reloads into a clean local
-      state (reusing hardReloadApp()'s cache-clearing behavior from
-      01-state.js).
+   1. clearLocalData()   - wipes every local store + localStorage app keys,
+      leaves the cloud untouched, then hard-reloads into a clean state
+      (reusing hardReloadApp()'s cache-clearing from 01-state.js).
    2. hardPullFromCloud() - discards local data and rebuilds it entirely
       from whatever is currently in Firestore.
    3. hardPushToCloud()   - overwrites the cloud with a full mirror of the
-      current local database, local data left untouched.
+      current local database; local data left untouched.
 
- Both sync operations are built around the existing per-store push/pull
- primitives already defined in 11-firebase-sync.js and 02-db.js, so they
- stay consistent with the rest of the sync architecture instead of
- introducing a second parallel writer. Nothing here talks to Firestore
- directly except through those existing functions (plus the couple of
- bulk collection reads/deletes that don't have an existing per-item
- helper to reuse).
+ Both sync operations build on the existing per-store push/pull
+ primitives in 11-firebase-sync.js/02-db.js, so they stay consistent with
+ the rest of the sync architecture rather than introducing a second
+ parallel writer.
 
- DESIGN FOR "hard to accidentally trigger" (see requirement #3):
-  - Each action opens a themed confirmation dialog (see
-    openDangerConfirmModal() below) that requires the user to type an
-    exact confirmation phrase before the action button enables itself.
-  - Pull and Push use different accent colors (pull = blue/"incoming",
-    push = orange/"outgoing") and different confirmation phrases, so the
-    two can't be mixed up even by someone clicking fast.
-  - All three trigger buttons live behind the Settings sidebar's Danger
-    Zone section, are disabled for the duration of their own operation,
-    and show inline success/error status rather than a bare alert().
- =================================================================
+ DESIGN FOR "hard to accidentally trigger":
+  - Each action requires typing an exact confirmation phrase before its
+    button enables (see openDangerConfirmModal() below).
+  - Pull and Push use different accent colors and phrases so they can't
+    be mixed up.
+  - All three buttons live behind Settings > Danger Zone, disable for the
+    duration of their own operation, and show inline success/error status.
 */
-
-/*
- Reads every record in a store straight from IndexedDB, rather than
- whatever in-memory cache (loadedBooksMemory, loadedNotesMemory, etc.)
- happens to mirror it at this moment. This matters because those caches
- are only ever as fresh as the last explicit fetch, and this app has a
- documented race (see pullInitialSyncFromCloud() in 11-firebase-sync.js)
- where cloud sync can run before a given cache has been populated for the
- first time in a session. Both Hard Push (below) and Soft Pull/Push
- (16-soft-sync.js) share this one implementation rather than each
- duplicating it, so there's a single place that always reflects the real
- on-disk state instead of a snapshot that might be behind it.
-*/
-function getAllFromLocalStore(storeName) {
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction([storeName], "readonly");
-    const req = tx.objectStore(storeName).getAll();
-    req.onsuccess = () => resolve(req.result || []);
-    req.onerror = () => reject(req.error);
-  });
-}
 
 // -----------------------------------------------------------------
 // REUSABLE LOCAL-DATA-WIPE PRIMITIVE
@@ -98,7 +68,7 @@ function wipeAllLocalAppData() {
 */
 function clearAppLocalStorageKeys() {
   const keys = [
-    "EpubReader_UserConfig_v1",
+    Config.Db.USER_CONFIG_STORAGE_KEY,
     Config.Db.COLLAPSED_NOTE_TAG_KEYS_STORAGE_KEY,
     `${Config.Db.COLLAPSED_NOTE_TAG_KEYS_STORAGE_KEY}_ts`,
     Config.Db.LAST_NOTE_TAGS_STORAGE_KEY,
@@ -418,15 +388,12 @@ async function hardPushToCloud() {
   ]);
 
   /*
-   Read straight from IndexedDB rather than loadedBooksMemory/
-   loadedGroupsMemory/loadedNotesMemory/loadedNoteTagsMemory. Those
-   in-memory caches are only as fresh as the last explicit fetch, and
-   pullInitialSyncFromCloud() (11-firebase-sync.js) documents a real race
-   where cloud sync can run before a given cache is populated for the
-   first time in a session. If Hard Push trusted a stale/empty cache
-   here, it wouldn't just skip pushing real local data - the cleanup pass
-   below would see an empty local id set and DELETE every matching record
-   from the cloud, since nothing local would appear to reference it.
+   Reads straight from IndexedDB rather than the loadedX Memory caches,
+   which may not be populated yet this session (see the race documented
+   on pullInitialSyncFromCloud() in 11-firebase-sync.js). Trusting a
+   stale/empty cache here wouldn't just skip pushing real data - the
+   cleanup pass below would see an empty id set and delete every
+   matching cloud record.
   */
   const localBooks = await getAllFromLocalStore(STORE_BOOKS);
   const localGroups = await getAllFromLocalStore(STORE_GROUPS);

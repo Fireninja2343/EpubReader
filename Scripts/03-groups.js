@@ -2,21 +2,12 @@
 // STRUCTURAL LOCAL BUNDLE GROUPINGS ENGINES
 // =================================================================
 /*
- Note: this file used to also contain promptCreateGroup() and
- promptEditGroup(), an older prompt()-based create/edit flow. Both were dead
- code — fully superseded by the openGroupModal()/submitGroupModalForm() flow
- below (wired up to the "New Group" button and each group card's "Edit"
- button in index.html) and never called from anywhere. Removed to avoid two
- diverging implementations of the same feature.
+ Note: the old prompt()-based promptCreateGroup()/promptEditGroup() flow was
+ removed as dead code, fully superseded by openGroupModal()/submitGroupModalForm() below.
 */
 function deleteGroup(groupId) {
-  if (
-    !confirm(
-      "Are you sure you want to delete this group? (Books inside will return to Global Library view)",
-    )
-  )
-    return;
-
+  if (!confirm("Are you sure you want to delete this group? (Books inside will return to Global Library view)",)) return;
+  
   const transaction = db.transaction([STORE_BOOKS, STORE_GROUPS], "readwrite");
   const booksStore = transaction.objectStore(STORE_BOOKS);
   const groupsStore = transaction.objectStore(STORE_GROUPS);
@@ -98,7 +89,7 @@ function moveSelectedBooksToGroup(groupId) {
 // =================================================================
 // IN-APP NATIVE MODAL DIALOG INPUT MANAGEMENT FORMS
 // =================================================================
-function openGroupModal(isEditMode = false, groupId = null, name = '', color = '#252538') {
+function openGroupModal(isEditMode = false, groupId = null, name = '', color = Config.Miscellaneous.DEFAULT_GROUP_COLOR) {
     const modal = document.getElementById("group-config-modal");
     document.getElementById("modal-title-text").innerText = isEditMode ? "Modify Group Settings" : "Create New Reading Group";
     document.getElementById("modal-group-id").value = isEditMode ? groupId : "";

@@ -1,67 +1,38 @@
 /*
- =================================================================
  NOTES MODULE
- A note is either created from text the user selects while reading (its
- bookId/bookTitle are recorded so the note stays traceable even if the book
- is later deleted) or created manually from the Notes page, optionally with
- a book chosen from a <select> of the current library.
+ A note comes from text selected while reading (bookId/bookTitle recorded
+ so it stays traceable even if the book is later deleted) or is created
+ manually from the Notes page with an optional book link.
 
- Organization is by TAGS rather than a single group: a note can carry any
- number of manually-assigned tags (stored in note.tagIds, referencing rows
- in the STORE_NOTE_GROUPS store - the store name/schema is unchanged, only
- the user-facing concept is now "tags" instead of a single "group"). On top
- of those manual tags, any note that originated from (or was manually
- linked to) a book automatically gets a special "book tag" - this is never
- stored as its own row, it's derived at render time from note.bookId /
- note.bookTitle plus that book's current group color, so it can't drift out
- of sync and never needs a "None" placeholder when there isn't one.
+ Organized by TAGS rather than a single group: a note can carry any number
+ of manual tags (note.tagIds, referencing STORE_NOTE_GROUPS rows - schema
+ name unchanged, just user-facing "tags" now instead of "group"). Any note
+ linked to a book also gets a derived "book tag" (never stored, computed
+ at render time from bookId/bookTitle + that book's group color).
 
- Like the rest of the app, IndexedDB is the source of truth here; notes and
- tags are additionally mirrored to Firebase the same way books/groups are
- (see the pushNoteToCloud/pushNoteTagToCloud calls throughout this file and
- the notes/tags reconciliation in pullInitialSyncFromCloud(), 11-firebase-sync.js).
- =================================================================
+ IndexedDB is the source of truth; notes/tags mirror to Firebase the same
+ way books/groups do (see pushNoteToCloud/pushNoteTagToCloud calls here
+ and the reconciliation in pullInitialSyncFromCloud(), 11-firebase-sync.js).
 */
 
 let loadedNotesMemory = [];
 let loadedNoteTagsMemory = [];
 
 /*
- Keys of the tag sections the user has collapsed on the Notes page. An
- empty set means "show everything expanded" - this is deliberately the
- inverse of an "expanded" set so that newly created tags (and the "All
- Notes" section) start out expanded by default without any extra
- bookkeeping. "none" is the reserved key for the untagged bucket, "all" is
- the reserved key for the All Notes section. Book auto-tags use the key
- `book:<bookId>` so they can't collide with real tag ids.
-
- Persisted to localStorage (see load/saveCollapsedNoteTagKeys below) so a
- user's collapse layout survives reloads instead of resetting to fully
- expanded every time the Notes page is opened.
+ Keys of tag sections collapsed on the Notes page. Empty = everything
+ expanded (inverse of an "expanded" set, so new tags start expanded with
+ no bookkeeping). "none" = untagged bucket, "all" = All Notes section,
+ `book:<bookId>` = a book auto-tag. Persisted to localStorage so layout
+ survives reloads.
 */
 const COLLAPSED_NOTE_TAG_KEYS_STORAGE_KEY = Config.Db.COLLAPSED_NOTE_TAG_KEYS_STORAGE_KEY;
 
 function loadCollapsedNoteTagKeys() {
-  const raw = localStorage.getItem(COLLAPSED_NOTE_TAG_KEYS_STORAGE_KEY);
-  if (!raw) return new Set();
-  try {
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? new Set(parsed) : new Set();
-  } catch (e) {
-    return new Set();
-  }
+  return new Set(loadJsonArrayFromLocalStorage(COLLAPSED_NOTE_TAG_KEYS_STORAGE_KEY));
 }
 
 function saveCollapsedNoteTagKeys() {
-  localStorage.setItem(
-    COLLAPSED_NOTE_TAG_KEYS_STORAGE_KEY,
-    JSON.stringify(Array.from(collapsedNoteTagKeys)),
-  );
-  // Timestamp used only by 11-firebase-sync.js to decide whether this
-  // device's or the cloud's settings bundle is newer - never read by
-  // anything on this page itself.
-  localStorage.setItem(`${COLLAPSED_NOTE_TAG_KEYS_STORAGE_KEY}_ts`, String(Date.now()));
-  if (typeof pushNoteSettingsToCloud === "function") pushNoteSettingsToCloud();
+  saveJsonArrayToLocalStorage(COLLAPSED_NOTE_TAG_KEYS_STORAGE_KEY, Array.from(collapsedNoteTagKeys));
 }
 
 let collapsedNoteTagKeys = loadCollapsedNoteTagKeys();
@@ -76,33 +47,31 @@ const LAST_NOTE_TAGS_STORAGE_KEY = Config.Db.LAST_NOTE_TAGS_STORAGE_KEY;
 // -----------------------------------------------------------------
 // DATABASE LOAD / REFRESH
 // -----------------------------------------------------------------
-function fetchNotesLibrary() {
+async function fetchNotesLibrary() {
   if (!db) return;
   const transaction = db.transaction([STORE_NOTES, STORE_NOTE_GROUPS], "readonly");
   const notesStore = transaction.objectStore(STORE_NOTES);
   const noteTagsStore = transaction.objectStore(STORE_NOTE_GROUPS);
 
-  notesStore.getAll().onsuccess = (e) => {
-    loadedNotesMemory = e.target.result;
-  };
-  noteTagsStore.getAll().onsuccess = (e) => {
-    loadedNoteTagsMemory = e.target.result;
-  };
-  transaction.oncomplete = () => {
-    renderNotesPageIfOpen();
-    /*
-     Fire-and-forget backfill for notes/note tags created before
-     lastModified was stamped at write time (see updateNoteFields(),
-     createNoteTag(), etc. elsewhere in this file). Reuses the exact same
-     generic backfillMissingField() primitive books/groups use in
-     02-db.js's migrateMissingLastModified() - see that function's doc
-     comment for the full rationale. A no-op once every note/tag already
-     has one, so this is safe to call on every fetch.
-    */
-    if (typeof migrateMissingNoteLastModified === "function") {
-      migrateMissingNoteLastModified();
-    }
-  };
+  const [notes, tags] = await Promise.all([
+    getAllFromStore(notesStore),
+    getAllFromStore(noteTagsStore),
+  ]);
+  loadedNotesMemory = notes;
+  loadedNoteTagsMemory = tags;
+
+  renderNotesPageIfOpen();
+  /*
+   Fire-and-forget backfill for notes/note tags created before
+   lastModified was stamped at write time (see updateNoteFields(),
+   createNoteTag(), etc. elsewhere in this file). Reuses the same
+   backfillMissingField() primitive books/groups use in 02-db.js's
+   migrateMissingLastModified() - a no-op once every record already has
+   one, so safe to call on every fetch.
+  */
+  if (typeof migrateMissingNoteLastModified === "function") {
+    migrateMissingNoteLastModified();
+  }
 }
 
 /*
@@ -379,20 +348,11 @@ function submitNoteEditorForm() {
 }
 
 function loadLastUsedNoteTagIds() {
-  const raw = localStorage.getItem(LAST_NOTE_TAGS_STORAGE_KEY);
-  if (!raw) return [];
-  try {
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed.filter((n) => Number.isInteger(n)) : [];
-  } catch (e) {
-    return [];
-  }
+  return loadJsonArrayFromLocalStorage(LAST_NOTE_TAGS_STORAGE_KEY).filter((n) => Number.isInteger(n));
 }
 
 function saveLastUsedNoteTagIds(tagIds) {
-  localStorage.setItem(LAST_NOTE_TAGS_STORAGE_KEY, JSON.stringify(tagIds || []));
-  localStorage.setItem(`${LAST_NOTE_TAGS_STORAGE_KEY}_ts`, String(Date.now()));
-  if (typeof pushNoteSettingsToCloud === "function") pushNoteSettingsToCloud();
+  saveJsonArrayToLocalStorage(LAST_NOTE_TAGS_STORAGE_KEY, tagIds || []);
 }
 
 // -----------------------------------------------------------------
@@ -681,34 +641,16 @@ function triggerNoteContextAction(actionKey) {
   }
 }
 
-// Shared write-path for field edits
+// Shared write-path for field edits. lastModified is stamped at the
+// moment of the local edit (see updateBookRecord()'s doc comment in
+// 10-utils.js for the same rationale, applied here to notes).
 function updateNoteFields(noteId, changes) {
-  const transaction = db.transaction([STORE_NOTES], "readwrite");
-  const store = transaction.objectStore(STORE_NOTES);
-  let updatedRecord = null;
-  store.get(noteId).onsuccess = (e) => {
-    const record = e.target.result;
-    if (record) {
-      Object.assign(record, changes);
-      /*
-       Stamped here, at the moment of the actual local edit, rather than
-       only after a successful cloud push (see stampLocalNoteLastModified()
-       in 11-firebase-sync.js, kept as a second line of defense for pushes
-       triggered elsewhere, e.g. Hard Push/Soft Sync). Local notes/tags
-       previously had NO lastModified field at all, which meant
-       pullInitialSyncFromCloud()'s conflict comparison always read the
-       local side as 0 and the cloud copy won unconditionally, even when
-       the local edit was the newer one and simply hadn't been pushed yet.
-      */
-      record.lastModified = Date.now();
-      store.put(record);
-      updatedRecord = record;
-    }
-  };
-  transaction.oncomplete = () => {
-    fetchNotesLibrary();
-    if (updatedRecord && typeof pushNoteToCloud === "function") pushNoteToCloud(updatedRecord);
-  };
+  updateRecordInStore(
+    STORE_NOTES,
+    noteId,
+    (record) => Object.assign(record, changes),
+    typeof pushNoteToCloud === "function" ? pushNoteToCloud : null,
+  ).then(() => fetchNotesLibrary());
 }
 
 // -----------------------------------------------------------------
@@ -796,24 +738,12 @@ function renderNoteTagManageList() {
 }
 
 function updateNoteTag(tagId, changes) {
-  const transaction = db.transaction([STORE_NOTE_GROUPS], "readwrite");
-  const store = transaction.objectStore(STORE_NOTE_GROUPS);
-  let updatedRecord = null;
-  store.get(tagId).onsuccess = (e) => {
-    const record = e.target.result;
-    if (record) {
-      Object.assign(record, changes);
-      // See the comment on updateNoteFields() above (same file) for why -
-      // same fix, applied to tags.
-      record.lastModified = Date.now();
-      store.put(record);
-      updatedRecord = record;
-    }
-  };
-  transaction.oncomplete = () => {
-    fetchNotesLibrary();
-    if (updatedRecord && typeof pushNoteTagToCloud === "function") pushNoteTagToCloud(updatedRecord);
-  };
+  updateRecordInStore(
+    STORE_NOTE_GROUPS,
+    tagId,
+    (record) => Object.assign(record, changes),
+    typeof pushNoteTagToCloud === "function" ? pushNoteTagToCloud : null,
+  ).then(() => fetchNotesLibrary());
 }
 
 function createNoteTag() {

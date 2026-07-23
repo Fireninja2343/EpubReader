@@ -205,12 +205,10 @@ async function stepToPrevChapter() {
 // PERSISTENT CONFIGURATION STORAGE LAYER
 // =================================================================
 function loadSavedUserInterfaceSettings() {
-    const saved = localStorage.getItem("EpubReader_UserConfig_v1");
-    if (!saved) return;
+    const config = getUserConfig();
+    if (Object.keys(config).length === 0) return;
 
     try {
-        const config = JSON.parse(saved);
-        
         // Hydrate DOM element states from persistence parameters
         if (config.fontFamily) document.getElementById("setting-font-family").value = config.fontFamily;
         if (config.fontSize) document.getElementById("setting-font-size").value = config.fontSize;
@@ -293,14 +291,10 @@ function applyReaderButtonVisibility(key, shouldHide) {
 }
 
 function persistReaderButtonVisibilitySetting(key, isHidden) {
-    const saved = localStorage.getItem("EpubReader_UserConfig_v1");
-    let config = {};
-    if (saved) {
-        try { config = JSON.parse(saved); } catch (e) {}
-    }
+    const config = getUserConfig();
     if (!config.hiddenReaderButtons) config.hiddenReaderButtons = {};
     config.hiddenReaderButtons[key] = isHidden;
-    localStorage.setItem("EpubReader_UserConfig_v1", JSON.stringify(config));
+    saveUserConfig(config);
 }
 
 function saveAndApplyUserStyles() {
@@ -319,13 +313,7 @@ function saveAndApplyUserStyles() {
     //    it outright), so unrelated saved settings - like cardSize or the
     //    hiddenReaderButtons toggles below - don't get silently wiped out
     //    every time a font/style control changes.
-    const savedRaw = localStorage.getItem("EpubReader_UserConfig_v1");
-    let interfaceConfigurationPackage = {};
-    if (savedRaw) {
-        try { interfaceConfigurationPackage = JSON.parse(savedRaw); } catch (e) {}
-    }
-
-    Object.assign(interfaceConfigurationPackage, {
+    saveUserConfig({
         fontFamily: font,
         fontSize: size,
         lineSpacing: lineSpacing,
@@ -336,8 +324,6 @@ function saveAndApplyUserStyles() {
         scrollSpeed: scrollSpeed,
         cardSize: cardSize
     });
-
-    localStorage.setItem("EpubReader_UserConfig_v1", JSON.stringify(interfaceConfigurationPackage));
 
     // 3. Bind UI configurations down onto the text render frames context viewport
     document.getElementById("lbl-font-size").innerText = size;

@@ -2,28 +2,22 @@
 // READING ACTIVITY HISTORY - RAW EVENT LOG + CALENDAR HEATMAP
 // =================================================================
 /*
- This module adds a per-day reading-activity calendar (like GitHub's
- contribution graph) to the stats view. It's built entirely on top of the
- existing real-session engine in 09-stats-and-context-menu.js
- (continueOrStartReadingSession/endReadingSession) rather than duplicating
- any of its activity/idle detection - this file only adds:
+ READING ACTIVITY HISTORY - raw event log + calendar heatmap
+ Adds a per-day reading-activity calendar (GitHub-contribution-style) to
+ the stats view, built on top of the real-session engine in
+ 09-stats-and-context-menu.js rather than duplicating its activity/idle
+ detection. This file adds:
+   1. A "segment" layer recording the raw chapter range touched during the
+      open session (startHistorySegment/recordHistoryChapterVisited),
+      flushed to each book's readingHistory[] via upsertReadingHistoryEntry()
+      in 02-db.js (persistHistorySegment/closeHistorySegment).
+   2. Aggregation helpers turning that raw data into per-local-day totals
+      on demand (nothing derived is stored).
+   3. The heatmap renderer itself.
 
-   1. A "segment" layer that records the raw chapter range touched during
-      the currently open session (startHistorySegment/recordHistoryChapterVisited),
-      periodically flushed to each book's new readingHistory[] array
-      (persistHistorySegment/closeHistorySegment) via upsertReadingHistoryEntry()
-      in 02-db.js.
-   2. Pure aggregation helpers that turn that raw per-session data into
-      per-local-day totals on demand (nothing derived is ever stored).
-   3. The calendar heatmap renderer itself.
-
- readingHistory entry shape (see saveBookToDatabase() in 02-db.js):
-   { startTimestamp, endTimestamp, secondsSpent, chapterStart, chapterEnd }
-
- Existing books that predate this feature simply have no readingHistory
- array; every function below treats that the same as an empty array and
- never attempts to fabricate historical entries for time before this
- feature existed.
+ readingHistory entry shape: {startTimestamp, endTimestamp, secondsSpent,
+ chapterStart, chapterEnd}. Books predating this feature just have no
+ readingHistory array - treated the same as empty, never backfilled.
 */
 
 // -----------------------------------------------------------------
@@ -226,45 +220,26 @@ function aggregateReadingHistoryByLocalDay(books) {
 // -----------------------------------------------------------------
 // CALENDAR HEATMAP RENDERING
 // -----------------------------------------------------------------
-/*
- Responsive week-count sizing. All knobs live here so the behavior is easy
- to retune later without touching the layout logic itself:
-
-   - HEATMAP_MAX_WEEKS is the ceiling - 2 years is shown whenever there's room for it,
-     and we never show more than this even on ultra-wide screens.
-   - HEATMAP_MIN_WEEKS is the floor - below this the grid stops shrinking
-     and the scroll-wrapper's horizontal scroll takes over instead, so the
-     calendar never becomes so compressed it's unreadable.
-   - HEATMAP_CELL_PX/HEATMAP_GAP_PX mirror the actual rendered cell size
-     and gap (--heatmap-cell-size in styles.css, and the grid `gap`), used
-     as fallbacks if those can't be read live from CSS - see
-     getHeatmapCellMetrics() below, which reads the real values first so a
-     future change to --heatmap-cell-size doesn't silently desync this math.
-*/
+// HEATMAP_MAX_WEEKS: ceiling (2 years, never more even on ultra-wide).
+// HEATMAP_MIN_WEEKS: floor - below this, horizontal scroll takes over
+// instead of shrinking further into unreadability.
+// HEATMAP_CELL_PX/GAP_PX: fallbacks if --heatmap-cell-size/grid gap can't
+// be read live from CSS (see getHeatmapCellMetrics()).
 const HEATMAP_MAX_WEEKS = 106;
-const HEATMAP_MIN_WEEKS = 8; // never shrink below ~2 months before handing off to horizontal scroll
-const HEATMAP_CELL_PX = 12; // fallback if --heatmap-cell-size can't be read from CSS
-const HEATMAP_GAP_PX = 3; // fallback if the grid gap can't be read from CSS
+const HEATMAP_MIN_WEEKS = 8;
+const HEATMAP_CELL_PX = 12;
+const HEATMAP_GAP_PX = 3;
 const HEATMAP_LEVEL_THRESHOLDS = [0, 0.15, 0.4, 0.7, 1]; // fraction-of-reference cutoffs for levels 0-4
 /*
- What fraction-of-max scaling used to key everything off a single day's
- total is exactly the failure mode called out for the Book Length/Reading
- Speed distributions above (see buildDynamicBuckets' comment) - one
- unusually long reading day (a rainy Sunday marathon, a holiday) becomes
- the sole yardstick every other day is measured against, silently
- compressing a library's worth of genuinely solid reading days down into
- low heat levels because none of them come close to that one outlier.
-
- The fix mirrors the same Tukey's-fence-style approach already used there:
- instead of scaling against the true max, scale against a high percentile
- of the (non-zero) day totals - HEATMAP_REFERENCE_PERCENTILE below. A small
- number of extreme days above that percentile don't move the scale at all;
- they just land past fraction 1.0 and get clamped to the top level like
- any other day that clears it, the same way an outlier still gets tallied
- into a distribution's first/last bucket rather than stretching every
- bucket's width. This is percentile-based (data-driven) rather than a
- hardcoded seconds value, so it keeps working correctly regardless of
- whether someone reads 20 minutes or 5 hours on a typical day.
+ Scaling every day against the single highest day (like GitHub's default)
+ lets one outlier (a marathon reading day) become the sole yardstick,
+ compressing every other genuinely solid day down to low heat levels.
+ Fixed the same way as the Book Length/Reading Speed distributions
+ (buildDynamicBuckets' comment): scale against a high percentile of
+ non-zero day totals instead of the true max - HEATMAP_REFERENCE_PERCENTILE.
+ Days above that percentile just clamp to the top level rather than
+ stretching the scale, the same way an outlier still lands in a
+ distribution's first/last bucket instead of widening every bucket.
 */
 const HEATMAP_REFERENCE_PERCENTILE = 0.9;
 const HEATMAP_MIN_DAYS_FOR_PERCENTILE_REFERENCE = 5;
@@ -409,9 +384,11 @@ function renderReadingActivityCalendar() {
     // GitHub's - any days after today within the current week are rendered
     // too, just blanked out as "future", so the grid is always a clean
     // rectangle instead of an uneven last column.
-    const gridStart = new Date(todayStart);
-    gridStart.setDate(gridStart.getDate() - (totalWeeks * 7 - 1));
-    gridStart.setDate(gridStart.getDate() - gridStart.getDay());
+    const currentWeekStart = new Date(todayStart);
+    currentWeekStart.setDate(currentWeekStart.getDate() - currentWeekStart.getDay()); // Sunday of *this* week
+
+    const gridStart = new Date(currentWeekStart);
+    gridStart.setDate(gridStart.getDate() - (totalWeeks - 1) * 7); // back up (totalWeeks-1) full weeks
 
     const totalDays = totalWeeks * 7;
 

@@ -294,13 +294,5 @@ function applyLibraryInterfaceSettings() {
     const lbl = document.getElementById("lbl-card-size");
     if (lbl) lbl.innerText = size;
     document.documentElement.style.setProperty('--card-dimension-width', `${size}px`);
-    
-    // Update local storage backup parameters without rewriting other items defaults
-    const saved = localStorage.getItem("EpubReader_UserConfig_v1");
-    let currentConfig = {};
-    if (saved) {
-        try { currentConfig = JSON.parse(saved); } catch(e){}
-    }
-    currentConfig.cardSize = size;
-    localStorage.setItem("EpubReader_UserConfig_v1", JSON.stringify(currentConfig));
+    saveUserConfig({ cardSize: size });
 }

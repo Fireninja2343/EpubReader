@@ -13,24 +13,19 @@ window.addEventListener("blur", stopActiveReadingTimer);
 document.addEventListener("visibilitychange", () => {
     if (document.hidden) {
         stopActiveReadingTimer();
-        saveTimeToDB(); // Flush the exact trailing seconds before the tab goes away
-        endReadingSession("hidden"); // Backgrounding the tab ends the current session - see definition below
+        saveTimeToDB();
+        endReadingSession("hidden");
     } else if (document.hasFocus()) {
         startActiveReadingTimer();
     }
 });
 
-// Extra insurance for desktop users closing the tab outright rather than
-// switching away from it - visibilitychange covers the switch-away case above,
-// this covers the close-outright case that visibilitychange isn't guaranteed to catch.
 window.addEventListener("beforeunload", () => {
     saveTimeToDB();
     endReadingSession("unload");
 });
 
 const IDLE_THRESHOLD_MS = Config.Sync.IDLE_THRESHOLD_MS;
-// If no user activity is detected for this long, the tab is considered "abandoned" and time tracking pauses
-
 const DB_UPDATE_FREQUENCY = Config.Sync.CLOUD_PROGRESS_PUSH_INTERVAL_MS / 1000;
 const TICK_MS = 2000;
 
@@ -42,26 +37,15 @@ function recordUserActivity() {
     lastActivityTime = Date.now();
     /*
      Also feeds the real reading-session tracker below: the first activity
-     after the reader opens is what actually starts a session (opening the
-     reader alone does not), and every subsequent activity keeps extending
-     the session's "last interaction" clock that the inactivity check uses
+     after the reader opens is what actually starts a session (opening the reader alone does not),
+     and every subsequent activity keeps extending the session's "last interaction" clock that the inactivity check uses
      to decide when the session has ended.
     */
     continueOrStartReadingSession();
 }
 window.addEventListener("mousemove", recordUserActivity);
 window.addEventListener("keydown", recordUserActivity);
-// If the autoscroller scrolls a different element than this, update the id below to match
 document.getElementById("reader-container")?.addEventListener("scroll", recordUserActivity);
-/*
- mousemove/keydown/scroll alone miss deliberate clicks that don't also
- involve moving the mouse first - e.g. clicking directly on the progress
- bar (handleProgressBarClick in 07-reader-controls.js), the "Next Chapter"
- banner button (injectChapterEndBanner), or selecting text to create a
- note (12-notes.js). All of those are real engagement with the book and
- should both reset the idle clock and be able to start a session on their
- own, so click is captured on the reader container as well.
-*/
 document.getElementById("reader-container")?.addEventListener("click", recordUserActivity);
 
 
@@ -74,24 +58,11 @@ function startActiveReadingTimer() {
         if (readerActive && activeBookObject && document.hasFocus() && !document.hidden && isUserActive) {
             if (!activeBookObject.timeSpentSeconds) activeBookObject.timeSpentSeconds = 0;
             activeBookObject.timeSpentSeconds += (TICK_MS / 1000); // Increments ticker loop heartbeat frequency step bounds
-            /*
-             Batches the DB write to every 30 seconds (15 ticks) instead of every
-             tick, to cut down on disk I/O. activeBookObject in RAM stays perfectly
-             accurate every tick regardless - only the persisted copy lags behind,
-             and the visibilitychange/beforeunload handlers above flush the
-             trailing remainder so nothing gets lost when the tab hides or closes.
-            */
+            // Batches the DB write to every 30 seconds (15 ticks) instead of every tick, to cut down on disk I/O.
             if (activeBookObject.timeSpentSeconds % DB_UPDATE_FREQUENCY === 0) {
                 saveTimeToDB();
             }
         }
-        /*
-         Session inactivity check runs on every tick regardless of the
-         isUserActive gate above (which just pauses time-tracking - a
-         session that's gone quiet needs to be checked against the much
-         longer 5-minute session timeout even while time-tracking itself
-         is paused).
-        */
         checkSessionInactivityTimeout();
     }, TICK_MS);
 }
@@ -106,54 +77,21 @@ function stopActiveReadingTimer() {
 // nets above all go through the exact same save path.
 function saveTimeToDB() {
     if (!activeBookObject || !activeBookObject.id) return;
-
+    
+    const bookId = activeBookObject.id;
+    const seconds = activeBookObject.timeSpentSeconds;
     const now = new Date().getTime();
     const transaction = db.transaction([Config.Db.STORE_BOOKS], "readwrite");
     const store = transaction.objectStore(Config.Db.STORE_BOOKS);
     store.get(activeBookObject.id).onsuccess = (e) => {
         const record = e.target.result;
         if (record) {
-            record.timeSpentSeconds = activeBookObject.timeSpentSeconds;
-            /*
-             Root-cause fix: this write previously never touched
-             lastModified, unlike every other book-mutating write path in
-             the app (updateBookProgressInDB(), markBookAsRead(), the
-             toggleRead/group context-menu actions above, etc. - all of
-             them stamp it). Firestore's sync model (pullInitialSyncFromCloud()
-             in 11-firebase-sync.js) decides which side of a conflict is
-             newer purely by comparing lastModified - a timeSpentSeconds
-             update that doesn't bump it is therefore invisible to that
-             comparison. Concretely: read on mobile for 4 minutes ->
-             timeSpentSeconds updates and gets pushed to the cloud, but
-             under whatever stale lastModified this book already had ->
-             desktop's own local lastModified for that book can easily be
-             equal-or-newer -> desktop's pull never sees the cloud copy as
-             newer -> desktop keeps displaying its own old
-             timeSpentSeconds forever, permanently diverged from the
-             cloud/mobile despite both being "synced." Stamping it here
-             closes that gap the same way every other mutation already does.
-            */
+            record.timeSpentSeconds = seconds;
             record.lastModified = now;
             store.put(record);
         }
     };
-
-    /*
-     Reuses this exact same batched cadence (called from the tick loop every
-     DB_UPDATE_FREQUENCY seconds, plus from the hide/close safety nets) to
-     also flush the open reading-history segment - see 13-reading-history.js.
-     No separate interval needed, and it means active reading is never more
-     than one of these save cycles away from being safely persisted if the
-     tab crashes or closes unexpectedly.
-    */
     if (typeof persistHistorySegment === "function") persistHistorySegment();
-
-    /*
-     Mirrors the same stamped lastModified back into activeBookObject (the
-     in-memory copy the rest of the reader UI reads from), consistent with
-     how recordReadingSessionStart()/appendReadingSession() (02-db.js)
-     already mirror their own writes back into activeBookObject.
-    */
     activeBookObject.lastModified = now;
 }
 
@@ -354,11 +292,7 @@ function triggerContextAction(actionKey) {
             };
         }
     } else if (actionKey === 'toggleRead') {
-        const transaction = db.transaction([Config.Db.STORE_BOOKS], "readwrite");
-        const store = transaction.objectStore(Config.Db.STORE_BOOKS);
-        let updatedRecord = null;
-        store.get(targetBookObj.id).onsuccess = (e) => {
-            const r = e.target.result;
+        updateBookRecord(targetBookObj.id, (r) => {
             r.isRead = !r.isRead; // Toggle binary state
             /* Manual toggling should track completedDate the same way the
                automatic markBookAsRead() path does: set it the moment the
@@ -366,16 +300,7 @@ function triggerContextAction(actionKey) {
                if the user un-marks the book so it stops counting toward
                the completion timeline in the stats view. */
             r.completedDate = r.isRead ? (r.completedDate || new Date().getTime()) : null;
-            r.lastModified = new Date().getTime(); // Needed so the cloud/other devices know this copy is newer
-            store.put(r);
-            updatedRecord = r;
-        };
-        transaction.oncomplete = () => {
-            fetchLocalLibrary();
-            if (updatedRecord && typeof pushBookMetadataToCloud === "function") {
-                pushBookMetadataToCloud(updatedRecord);
-            }
-        };
+        }).then(() => fetchLocalLibrary());
     } else if (actionKey === 'backfillCompletionDate') {
         migrateSingleBookCompletionDate(targetBookObj.id).then((wasUpdated) => {
             if (wasUpdated) {
@@ -422,22 +347,9 @@ function triggerContextAction(actionKey) {
             }
             newGroupId = parsed;
         }
-        const transaction = db.transaction([Config.Db.STORE_BOOKS], "readwrite");
-        const store = transaction.objectStore(Config.Db.STORE_BOOKS);
-        let updatedRecord = null;
-        store.get(targetBookObj.id).onsuccess = (e) => {
-            const r = e.target.result;
+        updateBookRecord(targetBookObj.id, (r) => {
             r.groupId = newGroupId;
-            r.lastModified = new Date().getTime(); // Needed so the cloud/other devices know this copy is newer
-            store.put(r);
-            updatedRecord = r;
-        };
-        transaction.oncomplete = () => {
-            fetchLocalLibrary();
-            if (updatedRecord && typeof pushBookMetadataToCloud === "function") {
-                pushBookMetadataToCloud(updatedRecord);
-            }
-        };
+        }).then(() => fetchLocalLibrary());
     }
 }
 
@@ -538,12 +450,7 @@ async function openBookDiagnosticsModal(bookObj, modeType) {
         */
         try {
             const zip = await JSZip.loadAsync(bookObj.fileData);
-            const containerFile = await zip.file("META-INF/container.xml").async("string");
-            const parser = new DOMParser();
-            const containerDoc = parser.parseFromString(containerFile, "text/xml");
-            const opfPath = containerDoc.querySelector("rootfile").getAttribute("full-path");
-            const opfFile = await zip.file(opfPath).async("string");
-            const opfDoc = parser.parseFromString(opfFile, "text/xml");
+            const { opfDoc } = await openEpubContainer(zip);
 
             const metaTitle = opfDoc.querySelector("title")?.textContent || "Unknown Title";
             const creator = opfDoc.querySelector("creator")?.textContent || "Unknown Publisher Author";

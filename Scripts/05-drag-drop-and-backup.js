@@ -110,18 +110,10 @@ async function exportLibraryToJSON() {
   const notesStore = transaction.objectStore(STORE_NOTES);
   const noteGroupsStore = transaction.objectStore(STORE_NOTE_GROUPS);
 
-  const books = await new Promise((res) => {
-    booksStore.getAll().onsuccess = (e) => res(e.target.result);
-  });
-  const groups = await new Promise((res) => {
-    groupsStore.getAll().onsuccess = (e) => res(e.target.result);
-  });
-  const notes = await new Promise((res) => {
-    notesStore.getAll().onsuccess = (e) => res(e.target.result);
-  });
-  const noteGroups = await new Promise((res) => {
-    noteGroupsStore.getAll().onsuccess = (e) => res(e.target.result);
-  });
+  const books = await getAllFromStore(booksStore);
+  const groups = await getAllFromStore(groupsStore);
+  const notes = await getAllFromStore(notesStore);
+  const noteGroups = await getAllFromStore(noteGroupsStore);
 
   // Convert files safely
   const safeBooks = await Promise.all(
@@ -147,7 +139,7 @@ async function exportLibraryToJSON() {
   // that's never synced to the cloud at all - so a local-only backup is
   // the only way to carry those settings across devices too.
   const settings = {
-    userConfig: safeParseLocalStorageJSON("EpubReader_UserConfig_v1"),
+    userConfig: safeParseLocalStorageJSON(Config.Db.USER_CONFIG_STORAGE_KEY),
     collapsedNoteTagKeys: safeParseLocalStorageJSON(Config.Db.COLLAPSED_NOTE_TAG_KEYS_STORAGE_KEY),
     lastUsedNoteTagIds: safeParseLocalStorageJSON(Config.Db.LAST_NOTE_TAGS_STORAGE_KEY),
   };
@@ -245,7 +237,7 @@ function importLibraryFromJSON(event) {
         // of the IndexedDB transaction above, so this only runs once that
         // transaction has actually committed successfully.
         if (data.settings) {
-          restoreLocalStorageJSON("EpubReader_UserConfig_v1", data.settings.userConfig);
+          restoreLocalStorageJSON(Config.Db.USER_CONFIG_STORAGE_KEY, data.settings.userConfig);
           restoreLocalStorageJSON(Config.Db.COLLAPSED_NOTE_TAG_KEYS_STORAGE_KEY, data.settings.collapsedNoteTagKeys);
           restoreLocalStorageJSON(Config.Db.LAST_NOTE_TAGS_STORAGE_KEY, data.settings.lastUsedNoteTagIds);
         }

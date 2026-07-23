@@ -2,35 +2,22 @@
 // COMPLETION TIMELINE - MODULAR MULTI-MODE VISUALIZATION SYSTEM
 // =================================================================
 /*
- Everything the "📅 Completion Timeline" section in the stats view needs
- lives in this file. It replaces the single-purpose renderCompletionTimeline()
- that used to live in 09-stats-and-context-menu.js with three layers that
- stay deliberately separate, so a future mode never has to touch an
+ Everything the "📅 Completion Timeline" stats-view section needs, in
+ three deliberately separate layers so a future mode never touches an
  existing one:
 
    1. DATA LAYER (buildCompletionTimelineData) - one pass over
-      loadedBooksMemory that produces a normalized dataset every mode reads
-      from. No mode re-derives its own copy of "which books completed in
-      which month" - they all read the same buildCompletionTimelineData()
-      output, so a data fix (e.g. a new qualifying condition) only has to
-      happen once.
+      loadedBooksMemory producing a normalized dataset every mode reads
+      from, so a data fix only has to happen once.
+   2. MODE REGISTRY (TIMELINE_MODES) - {id, label, render(container, data)}
+      entries. Adding mode 5 is one new array entry; modes 1-4 don't change.
+   3. RENDER SHELL (renderCompletionTimeline) - draws the mode switcher and
+      dispatches to the active mode's render(). The only function
+      09-stats-and-context-menu.js calls into.
 
-   2. MODE REGISTRY (TIMELINE_MODES) - a plain array of
-      {id, label, render(container, data)} entries. Adding mode 5 later is
-      exactly one new entry pushed onto this array; nothing about modes 1-4
-      changes.
-
-   3. RENDER SHELL (renderCompletionTimeline) - draws the mode switcher
-      buttons and hands off to whichever mode's render() is currently
-      selected. This is the only function 09-stats-and-context-menu.js
-      calls into, same as before.
-
- The book-title tooltip (shared by modes 1 and 2) reuses the exact same
- positionFlyoutMenu()-based popup pattern already established by
- showHistoryDayTooltip() in 13-reading-history.js, just against a second
- dedicated tooltip element (#completion-timeline-tooltip) so the two
- tooltips never fight over the same DOM node if both happened to be
- triggered in quick succession.
+ The book-title tooltip (modes 1-2) reuses the positionFlyoutMenu()-based
+ pattern from showHistoryDayTooltip() in 13-reading-history.js, against
+ its own #completion-timeline-tooltip element so the two never collide.
 */
 
 // -----------------------------------------------------------------
@@ -43,24 +30,18 @@
      completionsByMonth: {
        "2026-01": { count: 2, books: [{id,title}, ...] }
      },
-     books: [ ...raw book records that qualify as "completed" (isRead && completedDate) ... ],
-     ganttBooks: [ ...raw book records that qualify for the Gantt mode
-       (completed, in progress, or paused - see getBookReadingStatus() in
-       10-utils.js) ... ],
+     books: [ ...completed books (isRead && completedDate) ... ],
+     ganttBooks: [ ...completed/in-progress/paused books, for mode 4 ... ],
    }
 
- Deliberately keyed by "YYYY-MM" strings (matching the format already used
- elsewhere in the stats view, e.g. renderReadingSpeedProgression) so any
- future cross-referencing between sections stays trivial.
+ Keyed by "YYYY-MM" strings, matching the format already used elsewhere
+ in the stats view (e.g. renderReadingSpeedProgression).
 
- ganttBooks is intentionally a separate field from books above rather than
- widening books itself: modes 1-3 (list/calendar/graph) are fundamentally
- about "how many books completed in month X" and must stay scoped to
- completed books only, while mode 4 (Gantt) is the one place that shows
- individual reading periods and so is the only mode that needs in-progress
- and paused books too. Books that were never started (see
- READING_STATUS.NOT_STARTED) are excluded from ganttBooks entirely - an
- unopened book has no reading period to draw a bar for.
+ ganttBooks is separate from books rather than widening it: modes 1-3
+ (list/calendar/graph) are strictly "completions per month", while mode 4
+ (Gantt) also needs in-progress/paused books to draw their bars.
+ Never-started books (READING_STATUS.NOT_STARTED) are excluded from both -
+ nothing to draw a bar for.
 */
 function buildCompletionTimelineData(books) {
     const completionsByMonth = {};
@@ -483,10 +464,9 @@ function renderTimelineModeGantt(container, data) {
 
     const rows = entries.map((entry, i) => {
         const leftPct = ((entry.startMs - globalStart) / totalSpanMs) * 100;
-        // Minimum width floor so a same-day (or very short) completion is
-        // still a visible, clickable/hoverable sliver rather than a
-        // zero-width bar that's impossible to hover.
-        const widthPct = Math.max(0.6, ((entry.endMs - entry.startMs) / totalSpanMs) * 100);
+        // Minimum width floor so a same-day (or very short) completion is still a visible,
+        // clickable/hoverable sliver rather than a zero-width bar that's impossible to hover.
+        const widthPct = Math.max(1, ((entry.endMs - entry.startMs) / totalSpanMs) * 100);
 
         const groupTint = resolveGroupTintForBook(entry.book);
         const barColor = groupTint || "var(--accent)";
@@ -521,25 +501,18 @@ function renderTimelineModeGantt(container, data) {
 }
 
 /*
- Builds one Gantt entry for a single book, or null if the book somehow has
- no real start point to anchor a bar to (shouldn't normally happen, since
- callers only pass books that getBookReadingStatus() already found to have
- real activity - this is just a defensive fallback for malformed data).
+ Builds one Gantt entry for a book, or null if it has no real start point
+ (shouldn't normally happen - defensive fallback for malformed data).
 
-   - startMs: the earliest real reading activity found for the book
-     (readingSessions/readingHistory), falling back to firstOpened for
-     older records that predate per-session tracking.
-   - endMs: completedDate for a completed book; otherwise the most recent
-     real activity found (see getLastRealReadingActivityTimestamp() in
-     10-utils.js) - deliberately NOT "now", so an in-progress book's bar
-     ends at its actual last page turned rather than stretching to today
-     every time the stats view happens to be opened.
-   - pauseGaps: every gap between consecutive activity intervals that's at
-     least Config.Reading.PAUSED_INACTIVITY_THRESHOLD_MS long - see
-     buildGanttPauseMarkers() below, which is what actually turns these
-     into the visible "|...|" portal markers. Built generically as an
-     array so more than one gap is already fully supported today, even
-     though most books will only ever have zero or one.
+   - startMs: earliest real activity (readingSessions/readingHistory),
+     falling back to firstOpened for older pre-session records.
+   - endMs: completedDate if completed; otherwise the most recent real
+     activity - deliberately not "now", so an in-progress bar ends at its
+     actual last page turned, not stretching to today on every view.
+   - pauseGaps: gaps >= Config.Reading.PAUSED_INACTIVITY_THRESHOLD_MS
+     between activity intervals (see buildGanttPauseMarkers() below, which
+     turns these into the "|...|" portal markers). An array since a book
+     can have more than one pause, though most have zero or one.
 */
 function buildGanttEntryForBook(book) {
     const status = getBookReadingStatus(book);
@@ -564,9 +537,10 @@ function buildGanttEntryForBook(book) {
             : null;
         if (lastActivity !== null) {
             endMs = lastActivity;
+        } else if (book.lastOpened) {
+            endMs = book.lastOpened;
         } else {
-            // No session/history data and not completed - only reachable via
-            // the firstOpened fallback above, so render as a single-day
+            // Truly nothing to anchor an end to - render as a single-day
             // sliver rather than an end point we don't actually have.
             endMs = startMs;
             hasRealEnd = false;

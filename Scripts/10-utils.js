@@ -1,37 +1,21 @@
 // =================================================================
-// READING STATUS - shared classification used by the per-book stats
-// table ("Individual Breakdown Per Book") and the Completion Timeline's
-// Gantt mode (14-timeline.js)
+// READING STATUS - shared classification (stats table + Timeline Gantt mode)
 // =================================================================
 /*
- Four mutually-exclusive statuses, in the order a book actually moves
- through them: notStarted -> inProgress -> (paused <-> inProgress)* -> completed.
- Kept as one function so both consumers can never disagree about which
- status a given book is in - "In Progress" in the stats table always means
- the exact same thing as "In Progress" in the timeline.
+ Four statuses, in the order a book moves through them:
+ notStarted -> inProgress -> (paused <-> inProgress)* -> completed.
 
-   - completed: book.isRead is true. Always wins regardless of any
-     inactivity gap - a finished book is never "Paused", even if the
-     person hasn't opened it since finishing it.
-
-   - notStarted: the book has never accumulated any real recorded reading
-     activity. "Real" here means readingSessions/readingHistory - both
-     arrays are only ever written to once a session survives the existing
-     noise-floor checks in continueOrStartReadingSession()/endReadingSession()
-     (09-stats-and-context-menu.js) and persistHistorySegment()
-     (13-reading-history.js), which already require genuine interaction
-     (scroll/click/keydown) to have fired and a handful of seconds to have
-     passed - so an empty history here is a reliable stand-in for "opened
-     it, but never actually engaged with it," without this function needing
-     to duplicate that interaction/duration tracking itself. Falling back to
-     book.currentChapter/scrollOffset (set the moment the reader opens,
-     regardless of engagement) would be too eager to call a book "started."
-
-   - paused: has real recorded activity, isn't completed, but the most
-     recent activity is older than Config.Reading.PAUSED_INACTIVITY_THRESHOLD_MS.
-
-   - inProgress: has real recorded activity, isn't completed, and the most
-     recent activity is within the pause threshold.
+   - completed: book.isRead is true. Always wins, even after a long gap.
+   - notStarted: no real recorded activity (readingSessions/readingHistory
+     both empty). Real sessions already require genuine interaction and a
+     minimum duration to get logged (see continueOrStartReadingSession()/
+     endReadingSession() in 09-stats-and-context-menu.js and
+     persistHistorySegment() in 13-reading-history.js), so this is a
+     reliable "opened it but never engaged" signal without duplicating
+     that logic here.
+   - paused: has real activity, not completed, but most recent activity is
+     older than Config.Reading.PAUSED_INACTIVITY_THRESHOLD_MS.
+   - inProgress: has real activity, not completed, within the pause threshold.
 */
 const READING_STATUS = {
     COMPLETED: "completed",
@@ -40,9 +24,7 @@ const READING_STATUS = {
     NOT_STARTED: "notStarted",
 };
 
-// Display metadata for each status - single source for the emoji/label
-// pairing so the stats table (and anywhere else that lists a book's
-// status as text) can't drift out of sync with the classification above.
+// Single source for status emoji/label pairing.
 const READING_STATUS_LABELS = {
     [READING_STATUS.COMPLETED]: "✅ Completed",
     [READING_STATUS.IN_PROGRESS]: "📖 In Progress",
@@ -50,15 +32,9 @@ const READING_STATUS_LABELS = {
     [READING_STATUS.NOT_STARTED]: "⬜ Not Started",
 };
 
-/*
- Returns the timestamp of the most recent *real* reading activity recorded
- for a book, or null if it has none. Prefers readingSessions (session.end)
- and readingHistory (entry.endTimestamp) over the coarser lastOpened field,
- since lastOpened updates the instant the reader opens even if the person
- immediately closes it again - it would reset a book's "last activity" clock
- without any real reading having happened, defeating the point of the pause
- check below.
-*/
+// Timestamp of the most recent real activity, or null. Prefers
+// readingSessions/readingHistory over the coarser lastOpened, which
+// updates the instant the reader opens even with zero real reading.
 function getLastRealReadingActivityTimestamp(book) {
     let latest = null;
 
@@ -81,37 +57,194 @@ function getLastRealReadingActivityTimestamp(book) {
     return latest;
 }
 
-// True if this book has at least one recorded real reading session/segment
-// - see the notStarted case in the big comment above.
+// True if the book has at least one recorded real reading session/segment.
 function hasRealReadingActivity(book) {
     return (Array.isArray(book.readingSessions) && book.readingSessions.length > 0)
         || (Array.isArray(book.readingHistory) && book.readingHistory.length > 0);
 }
 
-/*
- The main classifier. `now` is accepted as a parameter (defaulting to the
- real current time) purely so callers building a whole list at once - or
- tests - can pass a single consistent timestamp instead of each book's
- classification potentially straddling a clock tick.
-*/
+// Main classifier. `now` is a parameter so a caller classifying a whole
+// list at once can use one consistent timestamp instead of many.
 function getBookReadingStatus(book, now = Date.now()) {
     if (book.isRead) return READING_STATUS.COMPLETED;
-
     if (!hasRealReadingActivity(book)) return READING_STATUS.NOT_STARTED;
 
     const lastActivity = getLastRealReadingActivityTimestamp(book);
-    // Has session/history entries but somehow no valid end timestamp on any
-    // of them (malformed data) - treat as in-progress rather than crash on
-    // a null subtraction below, since we know for certain it was started.
+    // Has activity but no valid end timestamp (malformed data) - treat as
+    // in-progress rather than crash on a null subtraction below.
     if (lastActivity === null) return READING_STATUS.IN_PROGRESS;
 
     const idleFor = now - lastActivity;
-    if (idleFor >= Config.Reading.PAUSED_INACTIVITY_THRESHOLD_MS) {
-        return READING_STATUS.PAUSED;
-    }
-    return READING_STATUS.IN_PROGRESS;
+    return idleFor >= Config.Reading.PAUSED_INACTIVITY_THRESHOLD_MS
+        ? READING_STATUS.PAUSED
+        : READING_STATUS.IN_PROGRESS;
 }
 
+// =================================================================
+// SHARED STORAGE / DB HELPERS
+// =================================================================
+// Read/write helpers for the EpubReader_UserConfig_v1 localStorage blob.
+// saveUserConfig() merges its patch into whatever's already saved.
+function getUserConfig() {
+  const raw = localStorage.getItem(Config.Db.USER_CONFIG_STORAGE_KEY);
+  if (!raw) return {};
+  try {
+    return JSON.parse(raw);
+  } catch (e) {
+    console.warn("Failed to parse saved user config, falling back to defaults:", e);
+    return {};
+  }
+}
+
+function saveUserConfig(patch) {
+  const config = Object.assign(getUserConfig(), patch);
+  localStorage.setItem(Config.Db.USER_CONFIG_STORAGE_KEY, JSON.stringify(config));
+  return config;
+}
+
+// Wraps an IndexedDB store.getAll() in a Promise.
+function getAllFromStore(store) {
+  return new Promise((resolve) => {
+    store.getAll().onsuccess = (e) => resolve(e.target.result);
+  });
+}
+
+// Same as above but opens its own readonly transaction from a store name -
+// for callers (sync/backup code) that don't already have a store handle,
+// and that may run before loadedBooksMemory/loadedGroupsMemory etc. are
+// populated for the first time, so reading IndexedDB directly matters.
+function getAllFromLocalStore(storeName) {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction([storeName], "readonly");
+    const req = tx.objectStore(storeName).getAll();
+    req.onsuccess = () => resolve(req.result || []);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+/*
+ Stamps lastModified onto a local IndexedDB record (group/note/note tag)
+ after a successful cloud push, and mirrors it into that record's
+ in-memory cache array if present - shared shape behind
+ stampLocalGroupLastModified/stampLocalNoteLastModified/
+ stampLocalNoteTagLastModified in 11-firebase-sync.js. cacheArray may be
+ undefined (e.g. not yet loaded) - skipped safely in that case.
+*/
+function stampLocalRecordLastModified(storeName, cacheArray, recordId, lastModified) {
+  if (!db) return Promise.resolve();
+  return new Promise((resolve) => {
+    const tx = db.transaction([storeName], "readwrite");
+    const store = tx.objectStore(storeName);
+    store.get(recordId).onsuccess = (e) => {
+      const record = e.target.result;
+      if (record) {
+        record.lastModified = lastModified;
+        store.put(record);
+        const cached = cacheArray && cacheArray.find((r) => r.id === recordId);
+        if (cached) cached.lastModified = lastModified;
+      }
+    };
+    tx.oncomplete = resolve;
+    tx.onerror = () => resolve();
+  });
+}
+
+/*
+ Opens an EPUB zip's META-INF/container.xml to find the OPF path, then
+ parses that OPF. Returns {opfDoc, opfPath, baseDir} - baseDir is opfPath's
+ directory (trailing slash included), used to resolve manifest/spine hrefs.
+*/
+async function openEpubContainer(zip) {
+  const containerFile = await zip.file("META-INF/container.xml").async("string");
+  const parser = new DOMParser();
+  const containerDoc = parser.parseFromString(containerFile, "text/xml");
+  const opfPath = containerDoc.querySelector("rootfile").getAttribute("full-path");
+  const opfFile = await zip.file(opfPath).async("string");
+  const opfDoc = parser.parseFromString(opfFile, "text/xml");
+  const baseDir = opfPath.substring(0, opfPath.lastIndexOf("/") + 1);
+  return { opfDoc, opfPath, baseDir };
+}
+
+/*
+ Loads a book record, mutates it via mutateFn (in place), persists it, and
+ pushes to the cloud. Always stamps lastModified. Resolves to the updated
+ record, or null if the book wasn't found.
+*/
+function updateBookRecord(bookId, mutateFn) {
+  return new Promise((resolve) => {
+    const transaction = db.transaction([Config.Db.STORE_BOOKS], "readwrite");
+    const store = transaction.objectStore(Config.Db.STORE_BOOKS);
+    let updatedRecord = null;
+    store.get(bookId).onsuccess = (e) => {
+      const record = e.target.result;
+      if (record) {
+        mutateFn(record);
+        record.lastModified = new Date().getTime();
+        store.put(record);
+        updatedRecord = record;
+      }
+    };
+    transaction.oncomplete = () => {
+      if (updatedRecord && typeof pushBookMetadataToCloud === "function") {
+        pushBookMetadataToCloud(updatedRecord);
+      }
+      resolve(updatedRecord);
+    };
+    transaction.onerror = () => resolve(null);
+  });
+}
+
+/*
+ Store-agnostic sibling of updateBookRecord() above, for stores other than
+ books (e.g. notes/note tags in 12-notes.js) that don't need a cloud push
+ baked in - the caller passes its own pushFn (or null to skip). Same
+ get/mutate/put/stamp-lastModified shape either way.
+*/
+function updateRecordInStore(storeName, recordId, mutateFn, pushFn) {
+  return new Promise((resolve) => {
+    const transaction = db.transaction([storeName], "readwrite");
+    const store = transaction.objectStore(storeName);
+    let updatedRecord = null;
+    store.get(recordId).onsuccess = (e) => {
+      const record = e.target.result;
+      if (record) {
+        mutateFn(record);
+        record.lastModified = Date.now();
+        store.put(record);
+        updatedRecord = record;
+      }
+    };
+    transaction.oncomplete = () => {
+      if (updatedRecord && typeof pushFn === "function") pushFn(updatedRecord);
+      resolve(updatedRecord);
+    };
+    transaction.onerror = () => resolve(null);
+  });
+}
+
+/*
+ Shared read/write for a JSON array persisted to a localStorage key, with
+ the "_ts" companion timestamp (read by 11-firebase-sync.js to compare
+ against a remote settings bundle) and a fire-and-forget settings push -
+ the exact pattern behind loadCollapsedNoteTagKeys/saveCollapsedNoteTagKeys
+ and loadLastUsedNoteTagIds/saveLastUsedNoteTagIds in 12-notes.js.
+*/
+function loadJsonArrayFromLocalStorage(key) {
+  const raw = localStorage.getItem(key);
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+function saveJsonArrayToLocalStorage(key, arr) {
+  localStorage.setItem(key, JSON.stringify(arr));
+  localStorage.setItem(`${key}_ts`, String(Date.now()));
+  if (typeof pushNoteSettingsToCloud === "function") pushNoteSettingsToCloud();
+}
 
 function normalizePath(pathString) {
   const parts = pathString.split("/");
@@ -136,12 +269,9 @@ function convertBlobToBase64(blobItem) {
   });
 }
 
-// Escapes text pulled from untrusted sources (book titles/authors parsed out
-// of an uploaded .epub's own metadata) before it's interpolated into an
-// innerHTML template string. Without this, an .epub crafted with e.g.
-// <title>&lt;img src=x onerror=alert(1)&gt;</title> in its OPF metadata would
-// have that markup executed as real HTML wherever the title is displayed via
-// innerHTML (the book-metrics modal and the stats table).
+// Escapes untrusted text (book titles/authors from an uploaded EPUB's own
+// metadata) before interpolating into innerHTML, so a crafted
+// <title>&lt;img onerror=...&gt;</title> can't execute as real markup.
 function escapeHtml(str) {
   if (str === null || str === undefined) return "";
   return String(str)
@@ -156,53 +286,35 @@ function escapeHtml(str) {
 // LIGHTWEIGHT MARKDOWN - note/comment display formatting
 // =================================================================
 /*
- Small, purpose-built formatter for note comments (see buildNoteCard() in
- 12-notes.js) - not a general-purpose Markdown engine, and deliberately
- not one: the codebase doesn't already depend on a Markdown library, and
- pulling one in just for a handful of inline styles (bold, italic,
- strikethrough, inline code) would be a lot of dead weight for a feature
- this narrow. Supports:
+ Small purpose-built formatter for note comments (see buildNoteCard() in
+ 12-notes.js), not a general Markdown engine - too narrow a use case to
+ justify a full library. Supports:
 
-   **bold**            -> <strong>
-   *italic*             -> <em>
-   ~~strike~~ or -strike- -> <del>
-   inline code (single backticks) -> <code>
-   __underline__        -> <u>
-   - item / * item       -> <ul><li>
-   1. item               -> <ol><li>
+   **bold** -> <strong>, *italic* -> <em>, ~~strike~~/-strike- -> <del>,
+   `code` -> <code>, __underline__ -> <u>, "- item"/"* item" -> <ul>,
+   "1. item" -> <ol>
 
- CRITICAL ORDERING: raw text is escaped FIRST (escapeHtml), before any
- Markdown substitution runs - every substitution below only ever wraps
- already-escaped text in a fixed, hardcoded tag, and never re-inserts
- anything the user typed as unescaped HTML. This is what makes it safe to
- render the result with innerHTML: even if someone's comment literally
- contains a script tag as text, escapeHtml turns that into inert
- "&lt;script&gt;..." text before any of the rules below ever see it, so
- there's no way for user-authored markup to survive into the rendered
- output - only the handful of tags this function itself hardcodes
- (strong, em, del, code, u, ul/ol/li) ever appear.
+ SAFETY: raw text is escaped FIRST (escapeHtml), before any Markdown
+ substitution - every rule below only wraps already-escaped text in a
+ fixed tag, so user-typed HTML can never survive into the rendered output.
 
- Rule order also matters for correctness, independent of safety:
-   1. Inline code runs first and is swapped out for placeholder
-      tokens before anything else touches the text, so formatting
-      characters *inside* a code span are never
-      misinterpreted as real Markdown - they're restored verbatim at the
-      very end.
-   2. Bold (double asterisk) before italic (single asterisk), since they
-      share a character - matching the double-asterisk form greedily first
-      prevents it from being parsed as an empty italic span next to
-      leftover asterisks.
-   3. Strikethrough and underline don't share a marker with anything else
-      above, so their order relative to bold/italic doesn't matter.
-   4. List lines are handled last, on the whole (already inline-formatted)
-      text split by line, since they're block-level rather than inline.
+ Rule order matters:
+   1. Inline code is pulled out to placeholder tokens first, so Markdown
+      characters inside a code span are never misinterpreted, then
+      restored verbatim at the end.
+   2. Bold before italic (share the * character) - matching ** greedily
+      first avoids it being parsed as an empty italic span.
+   3. Strikethrough/underline don't share a marker with the above, so
+      their order doesn't matter.
+   4. Lists are handled last, block-level, over the already inline-
+      formatted text split by line.
 */
 function renderLightweightMarkdown(rawText) {
     if (rawText === null || rawText === undefined || rawText === "") return "";
 
     let escaped = escapeHtml(rawText);
 
-    // --- 1. Inline code: pull spans out first, replace with placeholders ---
+    // 1. Inline code: pull spans out first, replace with placeholders
     const codeSpans = [];
     escaped = escaped.replace(/`([^`\n]+?)`/g, (match, code) => {
         const token = `\u0000CODE${codeSpans.length}\u0000`;
@@ -210,51 +322,40 @@ function renderLightweightMarkdown(rawText) {
         return token;
     });
 
-    // --- 2. Bold: **text** (before italic, since both use *) ---
+    // 2. Bold: **text** (before italic, since both use *)
     escaped = escaped.replace(/\*\*([^\n]+?)\*\*/g, "<strong>$1</strong>");
 
-    // --- 3. Italic: *text* (single asterisk, what's left after bold above) ---
+    // 3. Italic: *text*
     escaped = escaped.replace(/\*([^\n*]+?)\*/g, "<em>$1</em>");
 
-    // --- 4. Strikethrough: ~~text~~ or -text- ---
-    // The single-dash form requires no whitespace touching either dash
-    // (same convention as *italic* below) so ordinary hyphenated prose
-    // like "well - this is odd" or "a - b" doesn't get misread as strikethrough.
+    // 4. Strikethrough: ~~text~~ or -text- (single-dash form requires no
+    // whitespace touching either dash, so "well - this" isn't misread)
     escaped = escaped.replace(/~~([^\n]+?)~~/g, "<del>$1</del>");
     escaped = escaped.replace(/-(\S(?:[^\n-]*\S)?)-/g, "<del>$1</del>");
 
-    // --- 5. Underline: __text__ ---
+    // 5. Underline: __text__
     escaped = escaped.replace(/__([^\n]+?)__/g, "<u>$1</u>");
     escaped = escaped.replace(/_([^\n]+?)_/g, "<u>$1</u>");
 
-
-    // --- 6. Lists: group consecutive "- item"/"* item" or "1. item" lines ---
+    // 6. Lists: group consecutive "- item"/"* item" or "1. item" lines
     escaped = renderMarkdownLists(escaped);
 
-    // --- 7. Restore inline code spans, escaping any Markdown-looking
-    // characters inside them isn't needed (they were never processed as
-    // Markdown to begin with - see step 1) ---
+    // 7. Restore inline code spans (never processed as Markdown, so no
+    // re-escaping needed)
     escaped = escaped.replace(/\u0000CODE(\d+)\u0000/g, (match, idx) => `<code>${codeSpans[Number(idx)]}</code>`);
 
     return escaped;
 }
 
 /*
- Groups consecutive bullet ("- " / "* ") or numbered ("1. ", "2. ", ...)
- lines into a single <ul>/<ol>, rather than wrapping every line in its own
- list individually - a run of list lines should render as one list, not a
- stack of one-item lists. Lines that aren't part of a list are rejoined
- with <br> (see the loop at the bottom) so a plain multi-line comment still
- breaks visually the same way it did under the innerText this replaces.
+ Groups consecutive bullet/numbered lines into one <ul>/<ol> rather than a
+ stack of one-item lists. Non-list lines are rejoined with <br> so a plain
+ multi-line comment still breaks visually the same way innerText did.
 */
 function renderMarkdownLists(text) {
     const lines = text.split("\n");
-    // Each entry is {content, isBlock} - isBlock true for a flushed
-    // <ul>/<ol>, false for an ordinary line. Only consecutive non-block
-    // entries get glued together with <br> (see the join step below) -
-    // <ul>/<ol> are already block-level and don't need (or want) a <br>
-    // stitched onto either side of them, which would otherwise add an
-    // extra visual gap in most browsers.
+    // {content, isBlock} - isBlock true for a flushed <ul>/<ol> (already
+    // block-level, shouldn't get a <br> stitched on either side).
     const output = [];
     let listBuffer = [];
     let listType = null; // "ul" | "ol"
@@ -286,15 +387,8 @@ function renderMarkdownLists(text) {
     }
     flushList();
 
-    /*
-     Rejoin, inserting <br> only between two consecutive plain lines -
-     innerText (what this replaces in buildNoteCard()) rendered a bare
-     newline as a visual line break, but innerHTML collapses raw "\n" into
-     a single space. This is what keeps a plain multi-line comment (no list
-     markers at all) displaying exactly as it did before Markdown rendering
-     existed, without adding a stray extra gap around list blocks (which
-     are already block-level and don't need a <br> of their own).
-    */
+    // Rejoin, inserting <br> only between two consecutive plain lines
+    // (raw "\n" collapses to a space under innerHTML, unlike innerText).
     let result = "";
     for (let i = 0; i < output.length; i++) {
         if (i > 0 && !output[i].isBlock && !output[i - 1].isBlock) {
@@ -305,25 +399,22 @@ function renderMarkdownLists(text) {
     return result;
 }
 
-
 function positionFlyoutMenu(menu, triggerEvent) {
   const triggerRect = triggerEvent.currentTarget.getBoundingClientRect();
 
-  // Make the menu visible (but off in the corner) first so its natural
-  // width/height can actually be measured before it's positioned for real.
+  // Show off-screen first so natural width/height can be measured.
   menu.style.display = "block";
   menu.style.left = "0px";
   menu.style.top = "0px";
   const menuRect = menu.getBoundingClientRect();
 
-  // Default: open to the right of the trigger. Flip to the left if that
-  // would touch or exceed the right edge of the viewport.
+  // Default: open to the right of the trigger; flip left if that would
+  // run off the viewport's right edge.
   let left = triggerRect.right;
   if (left + menuRect.width >= window.innerWidth) {
     left = triggerRect.left - menuRect.width;
   }
-  // If flipping left would touch or exceed the left edge too (e.g. a
-  // narrow viewport), fall back to the right side and just clamp it.
+  // Flipping left would also run off (narrow viewport) - fall back right and clamp.
   if (left <= 0) {
     left = triggerRect.right;
   }
@@ -355,28 +446,19 @@ function base64ToBlob(base64) {
 
 /*
  Single source of truth for "does this book's tracked timeSpentSeconds
- count as real reading time, or is it noise" (a few accidental seconds
- from an open-then-immediately-close, a stray tap, etc.) - see
- Config.Reading.MIN_MEANINGFUL_TRACKED_SECONDS for the threshold itself
- and the rationale for its value.
-
- Returns 0 for anything below the threshold, or the value unchanged
- otherwise - callers should route every use of a book's timeSpentSeconds
- through this (or the minutes-returning variant below) rather than
- reading book.timeSpentSeconds directly, so a tiny tracked value can never
- register as nonzero reading time, distort an average/min/max, or feed
- into a per-hour rate calculation in one place while correctly showing as
- "0m" in another - see the "Reading Speed Over Lifetime" bug this closes
- in 09-stats-and-context-menu.js, which previously used raw
- timeSpentSeconds directly instead of going through this check.
+ count as real reading time, or noise" (a stray tap, an instant open/close).
+ See Config.Reading.MIN_MEANINGFUL_TRACKED_SECONDS for the threshold.
+ Returns 0 below the threshold, unchanged otherwise - every stats call site
+ should route through this (or the minutes wrapper below) rather than
+ reading timeSpentSeconds directly, so a tiny value can't distort an
+ average/rate in one place while showing "0m" in another.
 */
 function getMeaningfulTrackedSeconds(rawSeconds) {
     const seconds = rawSeconds || 0;
     return seconds >= Config.Reading.MIN_MEANINGFUL_TRACKED_SECONDS ? seconds : 0;
 }
 
-// Minutes-returning convenience wrapper, since most stats-view call sites
-// want mins = Math.round(seconds / 60) immediately afterward anyway.
+// Minutes-returning convenience wrapper.
 function getMeaningfulTrackedMinutes(rawSeconds) {
     return Math.round(getMeaningfulTrackedSeconds(rawSeconds) / 60);
 }
@@ -388,13 +470,10 @@ function formatMinutes(mins) {
 }
 
 /*
- Formats a *calendar-time* duration in milliseconds (e.g. firstOpened to
- completedDate - see "Completion Duration" in the stats view) - hours while
- under a day, whole days otherwise. Deliberately separate from
- formatMinutes() above: that one formats accumulated *reading time*
- (hh/mm), this one formats *elapsed wall-clock time* between two dates.
- They're different metrics that happen to both be durations, so they stay
- different functions rather than being forced through one shared formatter.
+ Formats a calendar-time duration in ms (e.g. firstOpened to completedDate)
+ - hours while under a day, whole days otherwise. Kept separate from
+ formatMinutes() above since that formats accumulated reading time (hh/mm)
+ while this formats elapsed wall-clock time between two dates.
 */
 function formatCompletionDuration(ms) {
     if (ms === null || ms === undefined || ms < 0) return "—";
@@ -405,27 +484,21 @@ function formatCompletionDuration(ms) {
     return `${days} day${days === 1 ? "" : "s"}`;
 }
 
+// =================================================================
+// ADAPTIVE AUTO-SCROLLER
+// =================================================================
 let enabled = false;
 const AUTOSCROLL_DEBUG = Config.AutoScroller.AUTOSCROLL_DEBUG;
 
-/*
- Auto-scroll moves a variable distance on each tick instead of a fixed
- pixel amount, calculated by computeAdaptiveStepPx() below based on how
- dense the currently visible text is. MIN_STEP_PX and MAX_STEP_PX are just
- safety bounds on that calculation, so a screen that's all images (0
- measurable words) or one giant word doesn't cause a step that's far too
- small or far too large.
-*/
+// MIN/MAX_STEP_PX bound computeAdaptiveStepPx() below so an all-image
+// screen (0 measurable words) or one giant word can't produce a step
+// that's far too small or large.
 const MIN_STEP_PX = Config.AutoScroller.MIN_STEP_PX;
 const MAX_STEP_PX = Config.AutoScroller.MAX_STEP_PX;
-const FALLBACK_STEP_PX = Config.AutoScroller.FALLBACK_STEP_PX; // used if no visible words can be measured at all
+const FALLBACK_STEP_PX = Config.AutoScroller.FALLBACK_STEP_PX; // used if no visible words can be measured
 
-/*
- Roughly how many words should scroll past the viewport per tick at the
- default speed setting. The speed slider in the UI only changes the delay
- between ticks (via getCooldownMs below); this constant is what defines
- how much content counts as "one tick's worth" of reading.
-*/
+// Roughly how many words should scroll past per tick at default speed.
+// The speed slider only changes the delay between ticks (getCooldownMs).
 const TARGET_WORDS_PER_TICK = Config.AutoScroller.TARGET_WORDS_PER_TICK;
 
 function getCooldownMs() {
@@ -460,12 +533,10 @@ function countVisibleWords() {
 }
 
 /*
- Converts "words currently visible in the viewport" into "pixels to scroll
- on this tick." pixelsPerWord is the value that actually changes with text
- density: a dense page packs words tightly, so pixelsPerWord is small and
- scrolling past TARGET_WORDS_PER_TICK worth of words only takes a few
- pixels. A sparse page (large text, lots of whitespace) has a large
- pixelsPerWord, so the same word target requires scrolling further.
+ Converts visible-word density into a per-tick pixel step. pixelsPerWord
+ shrinks on dense pages (small text/tight spacing) and grows on sparse
+ ones, so scrolling TARGET_WORDS_PER_TICK worth of words always takes
+ about the same reading time regardless of layout.
 */
 function computeAdaptiveStepPx() {
   const container = document.getElementById("reader-container");
@@ -562,7 +633,7 @@ document.addEventListener("keydown", (e) => {
     return;
   }
   if (e.ctrlKey && e.key === "d") {
-    return; // Already handled by the listener above — returning here avoids immediately re-toggling
+    return; // Already handled above — avoids immediately re-toggling
   }
  
   stopScroll();
