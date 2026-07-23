@@ -725,19 +725,19 @@ function showGanttBarTooltip(event, index) {
     if (!tooltip || !entries || !entries[index]) return;
 
     const entry = entries[index];
-    const startLabel = entry.hasRealStart ? new Date(entry.startMs).toLocaleDateString() : "Unknown";
+    const startLabel = entry.hasRealStart ? formatDateOnly(entry.startMs): "Unknown";
 
     // "Completed:" only makes sense for a finished book - an in-progress or
     // paused book's endMs is its last recorded activity, not a finish date.
     const endRowLabel = entry.status === READING_STATUS.COMPLETED ? "Completed" : "Last activity";
-    const endLabel = entry.hasRealEnd ? new Date(entry.endMs).toLocaleDateString() : "Unknown";
+    const endLabel = entry.hasRealEnd ? formatDateOnly(entry.endMs) : "Unknown";
     const spanLabel = entry.hasRealStart && entry.hasRealEnd
         ? formatCompletionDuration(entry.endMs - entry.startMs)
         : "—";
 
     const pauseRows = entry.pauseGaps.map((gap) => `
         <div class="calendar-day-tooltip-row calendar-day-tooltip-book-meta">
-            ⏸️ Paused ${new Date(gap.start).toLocaleDateString()} → ${new Date(gap.end).toLocaleDateString()}
+            ⏸️ Paused ${formatDateOnly(gap.start)} → ${formatDateOnly(gap.end)}
         </div>
     `).join("");
 

@@ -728,7 +728,7 @@
 .gantt-bar-inline-label {
     font-size: 11px;
     font-weight: 600;
-    color: var(--bg-main);
+    color: var(--glow);
     white-space: nowrap;
     padding: 0 6px;
     /* Only actually visible once the bar is wide enough to hold it - see

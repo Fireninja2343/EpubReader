@@ -29,6 +29,7 @@
     --text-main: #e0e0e0;
     --text-muted: #888888;
     --accent: #bb86fc;
+    --glow: #d939ee;
     --accent-dim: rgba(187, 134, 252, 0.2);
     --border: #222222;
     --stat-good-rgb: 100, 220, 130;
@@ -42,6 +43,7 @@
     --text-main: #5b4636;
     --text-muted: #8f7663;
     --accent: #a0522d;
+    --glow: #d77e1f;
     --accent-dim: rgba(160, 82, 45, 0.2);
     --border: #d3c29d;
     --stat-good-rgb: 60, 130, 70;
