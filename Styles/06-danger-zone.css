@@ -153,10 +153,6 @@
     color: var(--danger-clear-color);
 }
 
-/* The Confirm button itself always renders with dark text against its
-   (light-ish) accent background, and gets visibly inert while disabled -
-   both matter a lot here since this is the actual "commit" button for a
-   destructive action. */
 .btn-danger-confirm {
     color: #000;
     font-weight: bold;
@@ -281,7 +277,7 @@
 
 .soft-sync-op-row {
     display: grid;
-    grid-template-columns: 20px 1fr auto;
+    grid-template-columns: 14px 20px 1fr auto;
     align-items: center;
     gap: 8px;
     padding: 6px 8px;
@@ -347,4 +343,88 @@
     opacity: 0.4;
     cursor: not-allowed;
     transform: none;
+} 
+/* =================================================================
+   SOFT SYNC — EXPANDABLE FIELD-DIFF PANEL
+   Each row in the operation list above can expand to show exactly which
+   fields differ (see renderOpDetailPanelHtml() in 20-soft-sync.js). Reuses
+   the same --danger-pull-color/--danger-push-color/--text-* variables as
+   the rest of this file rather than introducing new ones, so the panel
+   inherits whatever theme is active instead of hardcoding its own colors.
+   ================================================================= */
+
+.soft-sync-op-wrapper {
+    border-bottom: 1px solid var(--border);
+}
+.soft-sync-op-wrapper:last-child {
+    border-bottom: none;
+}
+
+.soft-sync-op-row-expandable {
+    cursor: pointer;
+}
+.soft-sync-op-row-expandable:hover {
+    background-color: var(--bg-main);
+}
+
+.soft-sync-op-expand-toggle {
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 11px;
+}
+
+.soft-sync-op-detail-panel {
+    padding: 6px 10px 10px 34px;
+    background-color: var(--bg-main);
+    font-size: 12.5px;
+}
+
+.soft-sync-diff-group-heading {
+    margin: 8px 0 3px;
+    font-weight: 700;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-muted);
+}
+.soft-sync-diff-group-heading:first-child {
+    margin-top: 0;
+}
+
+.soft-sync-diff-column-headings,
+.soft-sync-diff-row {
+    display: grid;
+    grid-template-columns: minmax(110px, 1fr) minmax(80px, 1.2fr) 16px minmax(80px, 1.2fr);
+    align-items: baseline;
+    gap: 6px;
+    padding: 2px 0;
+}
+
+.soft-sync-diff-column-headings {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text-muted);
+}
+
+.soft-sync-diff-field-label {
+    color: var(--text-muted);
+}
+
+.soft-sync-diff-value {
+    word-break: break-word;
+    font-family: "Courier New", monospace;
+    color: var(--text-main);
+}
+
+.soft-sync-diff-value-from {
+    opacity: 0.7;
+}
+
+.soft-sync-diff-value-to {
+    font-weight: 600;
+}
+
+.soft-sync-diff-arrow {
+    text-align: center;
+    color: var(--text-muted);
 }
