@@ -626,6 +626,187 @@
 }
 
 /* --- Mode 4: Reading Journey Gantt --- */
+
+/*
+ Scale sub-controls (Infinite / Scroll / Windowed) - appear inline on the
+ mode-switcher row, immediately after the "📊 Gantt" button, only while
+ Gantt is the active mode (see buildGanttScaleControlsHtml() in
+ 14-completion-timeline.js). Sized down from .timeline-mode-btn (~75%)
+ since these are a secondary, nested choice rather than a top-level mode.
+ The rise-up + fade-in on mount reads as the controls being "brought up"
+ out of the Gantt button rather than just appearing.
+*/
+.gantt-scale-controls {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    animation: gantt-scale-controls-rise-in 0.2s ease-out;
+}
+
+@keyframes gantt-scale-controls-rise-in {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.gantt-scale-btn {
+    background: var(--bg-card);
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    padding: 4px 9px;
+    font-size: 9px;
+    cursor: pointer;
+    transition: all 0.15s ease-in-out;
+}
+
+.gantt-scale-btn:hover {
+    border-color: var(--accent);
+    color: var(--text-main);
+}
+
+.gantt-scale-btn.active {
+    background: var(--accent-dim);
+    border-color: var(--accent);
+    color: var(--accent);
+    font-weight: 600;
+}
+
+/* Window preset chip row - shown under/beside the scale buttons only
+   when "Windowed" is the active scale mode. Its own rise-in so it reads
+   as a second, nested pop-up rather than appearing flat with the row
+   above it. */
+.gantt-preset-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 5px;
+    animation: gantt-scale-controls-rise-in 0.2s ease-out;
+}
+
+.gantt-preset-chip {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 3px 8px;
+    font-size: 9px;
+    color: var(--text-muted);
+    transition: all 0.15s ease-in-out;
+}
+
+.gantt-preset-chip.active {
+    background: var(--accent-dim);
+    border-color: var(--accent);
+    color: var(--accent);
+    font-weight: 600;
+}
+
+.gantt-preset-chip-label {
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+/* Edit/delete icons only reveal on hover, so the row reads as plain
+   selectable chips at a glance - same reveal-on-intent approach as
+   .gantt-bar-too-narrow's inline label toggling below. */
+.gantt-preset-chip-actions {
+    display: inline-flex;
+    gap: 3px;
+    opacity: 0;
+    max-width: 0;
+    overflow: hidden;
+    transition: opacity 0.15s ease-in-out, max-width 0.15s ease-in-out;
+}
+
+.gantt-preset-chip:hover .gantt-preset-chip-actions {
+    opacity: 1;
+    max-width: 40px;
+}
+
+.gantt-preset-chip-action {
+    cursor: pointer;
+    font-size: 9px;
+}
+
+.gantt-preset-add-btn {
+    background: transparent;
+    color: var(--text-muted);
+    border: 1px dashed var(--border);
+    border-radius: 10px;
+    padding: 2px 8px;
+    font-size: 11px;
+    line-height: 1.3;
+    cursor: pointer;
+    transition: all 0.15s ease-in-out;
+}
+
+.gantt-preset-add-btn:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+/* Inline create/edit form that swaps into #gantt-preset-row in place of
+   the chips (see showGanttPresetForm() in 14-completion-timeline.js) -
+   no modal, matching how the rest of this row behaves. */
+.gantt-preset-form {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    flex-wrap: wrap;
+}
+
+.gantt-preset-form-input {
+    background: var(--bg-card);
+    color: var(--text-main);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    padding: 3px 6px;
+    font-size: 11px;
+}
+
+.gantt-preset-form-label-input {
+    width: 130px;
+}
+
+.gantt-preset-form-amount-input {
+    width: 55px;
+}
+
+.gantt-preset-form-save, .gantt-preset-form-cancel {
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    padding: 3px 8px;
+    font-size: 11px;
+    cursor: pointer;
+    background: var(--bg-card);
+    color: var(--text-muted);
+    transition: all 0.15s ease-in-out;
+}
+
+.gantt-preset-form-save:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+.gantt-preset-form-cancel:hover {
+    border-color: var(--text-main);
+    color: var(--text-main);
+}
+
+/* Horizontal-scroll wrapper used only by "scroll" scale mode - mirrors
+   .heatmap-scroll-wrapper in this same file exactly, so a growing
+   library scrolls sideways at a constant bar density instead of
+   compressing (see computeGanttScale()/GANTT_SCROLL_PX_PER_DAY in
+   14-completion-timeline.js). */
+.gantt-scroll-wrapper {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 4px;
+}
+
 .gantt-container {
     display: flex;
     flex-direction: column;
@@ -657,6 +838,44 @@
     height: 22px;
     background: color-mix(in srgb, var(--border) 40%, transparent);
     border-radius: 4px;
+}
+
+/*
+ "Scroll" scale mode sets an explicit inline px width on .gantt-row-track
+ (see renderTimelineModeGantt() in 14-completion-timeline.js) so the track
+ can grow past its flex container's width and actually be scrolled to -
+ flex:1's implicit flex-basis:0 would otherwise collapse that inline width
+ right back down. Only applies inside .gantt-scroll-wrapper, so
+ infinite/windowed mode's %-based flex:1 track is untouched.
+*/
+.gantt-scroll-wrapper .gantt-row-track {
+    flex: 0 0 auto;
+}
+
+/* .gantt-container is normally block/flex-column at 100% of its parent's
+   width; inside the scroll wrapper it instead needs to size to its own
+   widest row (driven by the row-track's inline px width) so there's
+   actually excess width for .gantt-scroll-wrapper's overflow-x to scroll
+   through, rather than every row being clipped back down to the
+   wrapper's own viewport width. */
+.gantt-scroll-wrapper .gantt-container {
+    width: max-content;
+    min-width: 100%;
+}
+
+/* Keeps each row's title label a fixed, un-scrolled width while the track
+   beside it scrolls horizontally, and stops the whole row from wrapping
+   onto multiple lines as its track grows wider than the viewport. */
+.gantt-scroll-wrapper .gantt-row {
+    width: max-content;
+    min-width: 100%;
+}
+
+.gantt-scroll-wrapper .gantt-row-label {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    background: var(--bg-card, transparent);
 }
 
 .gantt-bar {

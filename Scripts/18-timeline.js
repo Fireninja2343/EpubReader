@@ -18,6 +18,15 @@
  The book-title tooltip (modes 1-2) reuses the positionFlyoutMenu()-based
  pattern from showHistoryDayTooltip() in 13-reading-history.js, against
  its own #completion-timeline-tooltip element so the two never collide.
+
+ Mode 4 (Gantt) has its own nested sub-system on top of the above: three
+ scale modes (Infinite/Scroll/Windowed - see the comment above
+ ganttScaleMode below) controlling how books are laid out along the time
+ axis, plus user-editable "time window" presets for Windowed mode. Both
+ the active top-level mode (activeTimelineModeId) and the active Gantt
+ scale mode/preset are persisted via getUserConfig()/saveUserConfig() in
+ 14-utils.js, so the stats view reopens on whatever the person was last
+ looking at rather than resetting every reload.
 */
 
 // -----------------------------------------------------------------
@@ -109,13 +118,13 @@ function enumerateMonthRange(startKey, endKey) {
 // 2. MODE REGISTRY
 // -----------------------------------------------------------------
 /*
- Persisted only in-memory (not IndexedDB/localStorage) - the person's
- chosen visualization mode is a view preference, not reading data, and
- resetting to the default on reload/reopen is expected behavior for a
- stats-view display toggle, matching how other stats-view sections (e.g.
- the reading-speed progression) don't persist any view state either.
+ Persisted via the EpubReader_UserConfig_v1 localStorage blob (see
+ getUserConfig()/saveUserConfig() in 14-utils.js) rather than reset on
+ every reload - the person asked for the stats view to reopen on whichever
+ mode they were last looking at, same as any other durable view
+ preference already stored in that blob.
 */
-let activeTimelineModeId = "monthList";
+let activeTimelineModeId = getUserConfig().activeTimelineModeId || "monthList";
 
 const TIMELINE_MODES = [
     { id: "monthList", label: "📋 List", render: renderTimelineModeMonthList },
@@ -127,7 +136,270 @@ const TIMELINE_MODES = [
 function setTimelineMode(modeId) {
     if (!TIMELINE_MODES.some((m) => m.id === modeId)) return;
     activeTimelineModeId = modeId;
+    saveUserConfig({ activeTimelineModeId: modeId });
     renderCompletionTimeline(buildCompletionTimelineData(loadedBooksMemory));
+}
+
+// -----------------------------------------------------------------
+// GANTT SCALE MODES (Infinite / Scroll / Windowed) - state + presets
+// -----------------------------------------------------------------
+/*
+ Three ways of mapping the Gantt's books onto a fixed-width track:
+   - "infinite": today's original behavior. globalStart/globalEnd span
+     every book ever tracked, entries always fill exactly 100% of the
+     container, so the track compresses further every time the person's
+     overall reading history widens. No floor on how thin a bar can get
+     beyond the existing per-bar 1% width minimum.
+   - "scroll": a fixed px-per-day scale instead of a percentage-of-container
+     scale, so bar density never changes as history grows - the container
+     itself grows wider instead, inside a horizontally-scrolling wrapper
+     (mirrors .heatmap-scroll-wrapper's pattern in 13-reading-history.js).
+   - "windowed": globalEnd is pinned to right now (not the latest entry)
+     and globalStart is pinned to a person-chosen distance before that -
+     one of ganttWindowPresets - so the visible span is a constant,
+     user-controlled width that always ends at "today" and never
+     compresses, at the cost of not showing anything older than the window.
+ All three keep reading the same ganttBooks/buildGanttEntryForBook data;
+ only computeGanttScale() below and the bar layout math in
+ renderTimelineModeGantt() need to know which is active.
+*/
+let ganttScaleMode = getUserConfig().ganttScaleMode || "infinite";
+
+// Fixed density used by "scroll" mode - wide enough to keep month labels
+// (if added later) and pause markers legible without needing to be
+// user-configurable; this is a rendering density, not a data limit.
+const GANTT_SCROLL_PX_PER_DAY = 6;
+
+/*
+ Seed presets shown the first time someone opens Windowed mode with no
+ saved presets yet - deliberately small and calendar-shaped (not "30 days"
+ style raw counts) since that's how a person actually thinks about "how
+ far back do I want to look." All fully user-editable/deletable afterward;
+ this array is never re-seeded once ganttWindowPresets exists in saved
+ config, even if the person deletes every entry down to zero.
+*/
+const GANTT_DEFAULT_WINDOW_PRESETS = [
+    { id: "preset-1mo", label: "1 month", valueMs: 30 * 24 * 60 * 60 * 1000 },
+    { id: "preset-3mo", label: "3 months", valueMs: 91 * 24 * 60 * 60 * 1000 },
+    { id: "preset-1yr", label: "1 year", valueMs: 365 * 24 * 60 * 60 * 1000 },
+];
+
+function getGanttWindowPresets() {
+    const config = getUserConfig();
+    return Array.isArray(config.ganttWindowPresets) ? config.ganttWindowPresets : GANTT_DEFAULT_WINDOW_PRESETS;
+}
+
+function saveGanttWindowPresets(presets) {
+    saveUserConfig({ ganttWindowPresets: presets });
+}
+
+function getActiveGanttWindowPresetId() {
+    const config = getUserConfig();
+    const presets = getGanttWindowPresets();
+    // Falls back to the first available preset if nothing's been chosen
+    // yet, or if the previously-chosen preset was since deleted.
+    if (config.activeGanttWindowPresetId && presets.some((p) => p.id === config.activeGanttWindowPresetId)) {
+        return config.activeGanttWindowPresetId;
+    }
+    return presets.length > 0 ? presets[0].id : null;
+}
+
+function setGanttScaleMode(scaleMode) {
+    if (!["infinite", "scroll", "windowed"].includes(scaleMode)) return;
+    ganttScaleMode = scaleMode;
+    saveUserConfig({ ganttScaleMode: scaleMode });
+    renderCompletionTimeline(buildCompletionTimelineData(loadedBooksMemory));
+}
+
+function setActiveGanttWindowPreset(presetId) {
+    saveUserConfig({ activeGanttWindowPresetId: presetId });
+    renderCompletionTimeline(buildCompletionTimelineData(loadedBooksMemory));
+}
+
+/*
+ Adds a new user-defined preset (label + magnitude/unit, converted to ms)
+ and makes it the active one. valueMs uses real calendar-ish approximations
+ (30-day months, 365-day years) rather than exact month-length math (unlike
+ addMonthsToKey() above) since a Gantt window is a rough lookback distance,
+ not a calendar-anchored range - "3 months" here always means the same
+ fixed span regardless of which month it's measured from.
+*/
+function addGanttWindowPreset(label, amount, unit) {
+    const unitMs = { days: 86400000, weeks: 7 * 86400000, months: 30 * 86400000, years: 365 * 86400000 };
+    const valueMs = Math.round(Number(amount)) * (unitMs[unit] || unitMs.days);
+    if (!label || !valueMs || valueMs <= 0) return;
+
+    const presets = getGanttWindowPresets().slice();
+    const newPreset = { id: `preset-${Date.now()}`, label: label.trim(), valueMs };
+    presets.push(newPreset);
+    saveGanttWindowPresets(presets);
+    saveUserConfig({ activeGanttWindowPresetId: newPreset.id });
+    renderCompletionTimeline(buildCompletionTimelineData(loadedBooksMemory));
+}
+
+function editGanttWindowPreset(presetId, label, amount, unit) {
+    const unitMs = { days: 86400000, weeks: 7 * 86400000, months: 30 * 86400000, years: 365 * 86400000 };
+    const valueMs = Math.round(Number(amount)) * (unitMs[unit] || unitMs.days);
+    if (!label || !valueMs || valueMs <= 0) return;
+
+    const presets = getGanttWindowPresets().map((p) =>
+        p.id === presetId ? { ...p, label: label.trim(), valueMs } : p
+    );
+    saveGanttWindowPresets(presets);
+    renderCompletionTimeline(buildCompletionTimelineData(loadedBooksMemory));
+}
+
+function deleteGanttWindowPreset(presetId) {
+    const presets = getGanttWindowPresets().filter((p) => p.id !== presetId);
+    saveGanttWindowPresets(presets);
+
+    // If the deleted preset was the active one, fall back to whatever's
+    // first now (or null if the person deleted every preset).
+    const config = getUserConfig();
+    if (config.activeGanttWindowPresetId === presetId) {
+        saveUserConfig({ activeGanttWindowPresetId: presets.length > 0 ? presets[0].id : null });
+    }
+    renderCompletionTimeline(buildCompletionTimelineData(loadedBooksMemory));
+}
+
+/*
+ Single place that turns (entries, scaleMode, presets) into the
+ {globalStart, globalEnd, totalSpanMs, pxPerDay} numbers
+ renderTimelineModeGantt() lays bars out against - see the "infinite" /
+ "scroll" / "windowed" comment block above for what each mode means.
+ pxPerDay is null for "infinite"/"windowed" (both use %-of-container
+ layout); only "scroll" uses it.
+*/
+function computeGanttScale(entries, scaleMode) {
+    if (scaleMode === "windowed") {
+        const presetId = getActiveGanttWindowPresetId();
+        const presets = getGanttWindowPresets();
+        const preset = presets.find((p) => p.id === presetId) || presets[0] || GANTT_DEFAULT_WINDOW_PRESETS[0];
+
+        const globalEnd = Date.now();
+        const globalStart = globalEnd - preset.valueMs;
+        return { globalStart, globalEnd, totalSpanMs: Math.max(1, globalEnd - globalStart), pxPerDay: null };
+    }
+
+    const globalStart = Math.min(...entries.map((e) => e.startMs));
+    const globalEnd = Math.max(...entries.map((e) => e.endMs));
+    // Floor of one day's worth of ms avoids a division by ~0 when every
+    // book in the library was completed the same day it was opened.
+    const totalSpanMs = Math.max(24 * 60 * 60 * 1000, globalEnd - globalStart);
+
+    if (scaleMode === "scroll") {
+        return { globalStart, globalEnd, totalSpanMs, pxPerDay: GANTT_SCROLL_PX_PER_DAY };
+    }
+
+    // "infinite" (and any unrecognized value, defensively)
+    return { globalStart, globalEnd, totalSpanMs, pxPerDay: null };
+}
+
+/*
+ The 3 small scale-mode buttons (Infinite/Scroll/Windowed) that appear to
+ the right of the main "📊 Gantt" button, only while Gantt is the active
+ mode - see .gantt-scale-controls in styles.css for the rise-up+fade-in
+ entrance. Windowed additionally reveals the preset chip row underneath.
+*/
+function buildGanttScaleControlsHtml() {
+    const scaleButtons = [
+        { id: "infinite", label: "Infinite" },
+        { id: "scroll", label: "Scroll" },
+        { id: "windowed", label: "Windowed" },
+    ].map((s) => `
+        <button class="gantt-scale-btn ${s.id === ganttScaleMode ? "active" : ""}"
+                onclick="setGanttScaleMode('${s.id}')">${s.label}</button>
+    `).join("");
+
+    return `
+        <div class="gantt-scale-controls">
+            ${scaleButtons}
+            ${ganttScaleMode === "windowed" ? buildGanttWindowPresetChipsHtml() : ""}
+        </div>
+    `;
+}
+
+/*
+ One chip per saved preset plus a trailing "+" chip to create a new one.
+ Edit/delete affordances are hover-revealed (see .gantt-preset-chip-actions
+ in styles.css) rather than always-visible, so the row reads as plain
+ selectable chips at a glance and only shows management controls on
+ intent - same reveal-on-hover approach already used for
+ .gantt-bar-too-narrow's inline label toggling.
+*/
+function buildGanttWindowPresetChipsHtml() {
+    const presets = getGanttWindowPresets();
+    const activeId = getActiveGanttWindowPresetId();
+
+    const chips = presets.map((p) => `
+        <div class="gantt-preset-chip ${p.id === activeId ? "active" : ""}">
+            <span class="gantt-preset-chip-label" onclick="setActiveGanttWindowPreset('${p.id}')">${escapeHtml(p.label)}</span>
+            <span class="gantt-preset-chip-actions">
+                <span class="gantt-preset-chip-action" title="Edit" onclick="showGanttPresetForm('${p.id}')">✏️</span>
+                <span class="gantt-preset-chip-action" title="Delete" onclick="deleteGanttWindowPreset('${p.id}')">🗑️</span>
+            </span>
+        </div>
+    `).join("");
+
+    return `
+        <div class="gantt-preset-row" id="gantt-preset-row">
+            ${chips}
+            <button class="gantt-preset-add-btn" title="Add a new time limit" onclick="showGanttPresetForm(null)">+</button>
+        </div>
+    `;
+}
+
+/*
+ Swaps the preset row into an inline create/edit form in place - no modal,
+ matching the "no popup" preference already given for the scale controls
+ above. presetId is null when creating a new preset, or an existing
+ preset's id when editing one; either way the row re-renders back to
+ normal chips on save/cancel via renderCompletionTimeline().
+*/
+function showGanttPresetForm(presetId) {
+    const row = document.getElementById("gantt-preset-row");
+    if (!row) return;
+
+    const editing = presetId ? getGanttWindowPresets().find((p) => p.id === presetId) : null;
+    // Editing an existing preset pre-fills with its current value converted
+    // back to the largest clean unit, so "3 months" reopens as (3, months)
+    // rather than always dumping raw days into the form.
+    let amount = 1, unit = "months";
+    if (editing) {
+        const unitMsList = [["years", 365 * 86400000], ["months", 30 * 86400000], ["weeks", 7 * 86400000], ["days", 86400000]];
+        for (const [u, ms] of unitMsList) {
+            if (editing.valueMs % ms === 0) { unit = u; amount = editing.valueMs / ms; break; }
+        }
+    }
+
+    row.innerHTML = `
+        <div class="gantt-preset-form">
+            <input type="text" id="gantt-preset-form-label" class="gantt-preset-form-input gantt-preset-form-label-input"
+                   placeholder="Label (e.g. 6 months)" value="${editing ? escapeHtml(editing.label) : ""}" />
+            <input type="number" id="gantt-preset-form-amount" class="gantt-preset-form-input gantt-preset-form-amount-input"
+                   min="1" step="1" value="${amount}" />
+            <select id="gantt-preset-form-unit" class="gantt-preset-form-input">
+                <option value="days" ${unit === "days" ? "selected" : ""}>days</option>
+                <option value="weeks" ${unit === "weeks" ? "selected" : ""}>weeks</option>
+                <option value="months" ${unit === "months" ? "selected" : ""}>months</option>
+                <option value="years" ${unit === "years" ? "selected" : ""}>years</option>
+            </select>
+            <button class="gantt-preset-form-save" onclick="submitGanttPresetForm(${editing ? `'${presetId}'` : "null"})">✓</button>
+            <button class="gantt-preset-form-cancel" onclick="renderCompletionTimeline(buildCompletionTimelineData(loadedBooksMemory))">✕</button>
+        </div>
+    `;
+}
+
+function submitGanttPresetForm(presetId) {
+    const label = document.getElementById("gantt-preset-form-label").value;
+    const amount = document.getElementById("gantt-preset-form-amount").value;
+    const unit = document.getElementById("gantt-preset-form-unit").value;
+
+    if (presetId) {
+        editGanttWindowPreset(presetId, label, amount, unit);
+    } else {
+        addGanttWindowPreset(label, amount, unit);
+    }
 }
 
 // -----------------------------------------------------------------
@@ -150,6 +422,7 @@ function renderCompletionTimeline(data) {
                 <button
                     class="timeline-mode-btn ${m.id === activeTimelineModeId ? "active" : ""}"
                     onclick="setTimelineMode('${m.id}')">${m.label}</button>
+                ${m.id === "gantt" && activeTimelineModeId === "gantt" ? buildGanttScaleControlsHtml() : ""}
             `).join("")}
         </div>
         <div id="timeline-mode-body"></div>
@@ -446,7 +719,7 @@ function showTimelineGraphPointTooltip(event, index) {
  book.
 */
 function renderTimelineModeGantt(container, data) {
-    const entries = data.ganttBooks
+    let entries = data.ganttBooks
         .map((book) => buildGanttEntryForBook(book))
         .filter(Boolean)
         .sort((a, b) => a.startMs - b.startMs);
@@ -455,18 +728,56 @@ function renderTimelineModeGantt(container, data) {
         container.innerHTML = `<div class="empty-state-message">No books started yet.</div>`;
         return;
     }
-    
-    const globalStart = Math.min(...entries.map((e) => e.startMs));
-    const globalEnd = Math.max(...entries.map((e) => e.endMs));
-    // Floor of one day's worth of ms avoids a division by ~0 when every
-    // book in the library was completed the same day it was opened.
-    const totalSpanMs = Math.max(24 * 60 * 60 * 1000, globalEnd - globalStart);
+
+    const scale = computeGanttScale(entries, ganttScaleMode);
+    const { globalStart, globalEnd, totalSpanMs, pxPerDay } = scale;
+
+    if (ganttScaleMode === "windowed") {
+        // Drop anything that ends before the window starts (nothing of it
+        // would be visible), then clamp each surviving entry's start/end
+        // into the window so a bar that began before globalStart renders
+        // as starting exactly at the left edge instead of implying a
+        // negative-position (or simply wrong) start date.
+        entries = entries
+            .filter((e) => e.endMs >= globalStart)
+            .map((e) => ({
+                ...e,
+                clampedStartMs: Math.max(e.startMs, globalStart),
+                clampedEndMs: Math.min(e.endMs, globalEnd),
+            }));
+
+        if (entries.length === 0) {
+            container.innerHTML = `<div class="empty-state-message-spaced">No reading activity in this time window.</div>`;
+            return;
+        }
+    } else {
+        entries = entries.map((e) => ({ ...e, clampedStartMs: e.startMs, clampedEndMs: e.endMs }));
+    }
+
+    // px-based layout (scroll mode) needs the container to actually be
+    // wide enough to hold pxPerDay * totalDays; %-based layout (infinite/
+    // windowed) always fills exactly 100% of whatever width it's given.
+    const totalDays = pxPerDay ? Math.ceil(totalSpanMs / (24 * 60 * 60 * 1000)) : null;
+    const trackWidthPx = pxPerDay ? totalDays * pxPerDay : null;
 
     const rows = entries.map((entry, i) => {
-        const leftPct = ((entry.startMs - globalStart) / totalSpanMs) * 100;
-        // Minimum width floor so a same-day (or very short) completion is still a visible,
-        // clickable/hoverable sliver rather than a zero-width bar that's impossible to hover.
-        const widthPct = Math.max(1, ((entry.endMs - entry.startMs) / totalSpanMs) * 100);
+        const startForLayout = entry.clampedStartMs;
+        const endForLayout = entry.clampedEndMs;
+
+        let leftStyle, widthStyle;
+        if (pxPerDay) {
+            const leftPx = ((startForLayout - globalStart) / (24 * 60 * 60 * 1000)) * pxPerDay;
+            const widthPx = Math.max(4, ((endForLayout - startForLayout) / (24 * 60 * 60 * 1000)) * pxPerDay);
+            leftStyle = `${leftPx.toFixed(1)}px`;
+            widthStyle = `${widthPx.toFixed(1)}px`;
+        } else {
+            const leftPct = ((startForLayout - globalStart) / totalSpanMs) * 100;
+            // Minimum width floor so a same-day (or very short) completion is still a visible,
+            // clickable/hoverable sliver rather than a zero-width bar that's impossible to hover.
+            const widthPct = Math.max(1, ((endForLayout - startForLayout) / totalSpanMs) * 100);
+            leftStyle = `${leftPct.toFixed(2)}%`;
+            widthStyle = `${widthPct.toFixed(2)}%`;
+        }
 
         const groupTint = resolveGroupTintForBook(entry.book);
         const barColor = groupTint || "var(--accent)";
@@ -474,7 +785,13 @@ function renderTimelineModeGantt(container, data) {
         const activitySegments = buildGanttActivityGradient(entry);
         // Below this width, a title label would just overflow/get clipped
         // to nothing useful - see .gantt-bar-too-narrow in styles.css.
-        const tooNarrowForLabel = widthPct < 6;
+        // Percent-based estimate still applies even in px mode (pxPerDay is
+        // fixed, so a bar's px width maps back to roughly the same
+        // proportion of a typical row either way).
+        const approxWidthPct = pxPerDay
+            ? (parseFloat(widthStyle) / (trackWidthPx || 1)) * 100
+            : parseFloat(widthStyle);
+        const tooNarrowForLabel = approxWidthPct < 6 && !pxPerDay;
 
         const statusClass = `gantt-bar-status-${entry.status}`;
         const portalMarkers = buildGanttPauseMarkers(entry);
@@ -482,9 +799,9 @@ function renderTimelineModeGantt(container, data) {
         return `
             <div class="gantt-row">
                 <div class="gantt-row-label" title="${escapeHtml(entry.book.title)}">${escapeHtml(entry.book.title)}</div>
-                <div class="gantt-row-track">
+                <div class="gantt-row-track" ${pxPerDay ? `style="width:${trackWidthPx}px;"` : ""}>
                     <div class="gantt-bar ${statusClass} ${tooNarrowForLabel ? "gantt-bar-too-narrow" : ""}"
-                         style="left:${leftPct.toFixed(2)}%; width:${widthPct.toFixed(2)}%; background:${barColor}; ${activitySegments}"
+                         style="left:${leftStyle}; width:${widthStyle}; background:${barColor}; ${activitySegments}"
                          onmouseenter="showGanttBarTooltip(event, ${i})"
                          onmouseleave="hideCompletionMonthTooltip()">
                         <span class="gantt-bar-inline-label">${escapeHtml(entry.book.title)}</span>
@@ -497,7 +814,13 @@ function renderTimelineModeGantt(container, data) {
 
     window.__timelineGanttEntries = entries;
 
-    container.innerHTML = `<div class="gantt-container">${rows}</div>`;
+    const innerHtml = `<div class="gantt-container">${rows}</div>`;
+    // Only "scroll" mode needs the horizontal-overflow wrapper - infinite
+    // and windowed both always fill a fixed 100%-wide track and have
+    // nothing to scroll to.
+    container.innerHTML = pxPerDay
+        ? `<div class="gantt-scroll-wrapper">${innerHtml}</div>`
+        : innerHtml;
 }
 
 /*
@@ -632,28 +955,32 @@ function findGantPauseGaps(intervals) {
 /*
  Renders one pair of "|" portal markers per pause gap in entry.pauseGaps,
  positioned at the gap's start and end as a percentage of this bar's own
- width (entry.startMs/entry.endMs, the same reference frame leftPct/widthPct
- in renderTimelineModeGantt() were computed in - each marker's `left` here
- is a plain 0-100% within .gantt-bar itself, so no extra positioning
- arguments are needed beyond the entry). Visually this is meant to read
- like a portal: the bar "enters" at the left bar of a pair and "exits" at
- the right one, exactly like how a "portal" would function - the content
- between the two bars represents time that passed with no reading, not
- more reading squeezed into the same space.
+ *visible* width. Uses clampedStartMs/clampedEndMs (falling back to
+ startMs/endMs when a caller hasn't set clamped* fields at all) rather than
+ the book's full unclipped span, since in "windowed" mode the drawn bar
+ only covers the clipped portion - anchoring against the full span there
+ would push markers outside the bar or bunch them incorrectly. In
+ "infinite"/"scroll" mode clamped == unclipped, so this is a no-op change
+ for those two.
 */
 function buildGanttPauseMarkers(entry) {
     if (!entry.pauseGaps || entry.pauseGaps.length === 0) return "";
 
-    const barSpanMs = Math.max(1, entry.endMs - entry.startMs);
+    const barStartMs = typeof entry.clampedStartMs === "number" ? entry.clampedStartMs : entry.startMs;
+    const barEndMs = typeof entry.clampedEndMs === "number" ? entry.clampedEndMs : entry.endMs;
+    const barSpanMs = Math.max(1, barEndMs - barStartMs);
 
-    return entry.pauseGaps.map((gap) => {
-        const startPct = Math.max(0, Math.min(100, ((gap.start - entry.startMs) / barSpanMs) * 100));
-        const endPct = Math.max(0, Math.min(100, ((gap.end - entry.startMs) / barSpanMs) * 100));
-        return `
-            <span class="gantt-pause-portal-marker" style="left:${startPct.toFixed(2)}%;"></span>
-            <span class="gantt-pause-portal-marker" style="left:${endPct.toFixed(2)}%;"></span>
-        `;
-    }).join("");
+    return entry.pauseGaps
+        // Skip gaps entirely outside the visible bar - nothing to mark.
+        .filter((gap) => gap.end >= barStartMs && gap.start <= barEndMs)
+        .map((gap) => {
+            const startPct = Math.max(0, Math.min(100, ((gap.start - barStartMs) / barSpanMs) * 100));
+            const endPct = Math.max(0, Math.min(100, ((gap.end - barStartMs) / barSpanMs) * 100));
+            return `
+                <span class="gantt-pause-portal-marker" style="left:${startPct.toFixed(2)}%;"></span>
+                <span class="gantt-pause-portal-marker" style="left:${endPct.toFixed(2)}%;"></span>
+            `;
+        }).join("");
 }
 
 /*
@@ -685,11 +1012,19 @@ function buildGanttActivityGradient(entry) {
         return "";
     }
 
-    const spanMs = Math.max(1, entry.endMs - entry.startMs);
+    // Same clamped-vs-unclipped reasoning as buildGanttPauseMarkers() above:
+    // the gradient's day-by-day stops need to be positioned against the
+    // bar's actual visible span, not the book's full reading span, or a
+    // windowed/clipped bar's gradient would be built for a wider range than
+    // what's actually drawn on screen.
+    const barStartMs = typeof entry.clampedStartMs === "number" ? entry.clampedStartMs : entry.startMs;
+    const barEndMs = typeof entry.clampedEndMs === "number" ? entry.clampedEndMs : entry.endMs;
+
+    const spanMs = Math.max(1, barEndMs - barStartMs);
     const daySeconds = {};
     for (const histEntry of entry.book.readingHistory) {
         if (!histEntry || typeof histEntry.startTimestamp !== "number") continue;
-        if (histEntry.startTimestamp < entry.startMs || histEntry.startTimestamp > entry.endMs) continue;
+        if (histEntry.startTimestamp < barStartMs || histEntry.startTimestamp > barEndMs) continue;
         const dayKey = formatLocalDateKey(new Date(histEntry.startTimestamp));
         daySeconds[dayKey] = (daySeconds[dayKey] || 0) + (histEntry.secondsSpent || 0);
     }
@@ -700,10 +1035,10 @@ function buildGanttActivityGradient(entry) {
 
     const stops = [];
 
-    const startDate = new Date(entry.startMs);
+    const startDate = new Date(barStartMs);
     startDate.setHours(0, 0, 0, 0);
 
-    const endDate = new Date(entry.endMs);
+    const endDate = new Date(barEndMs);
     endDate.setHours(0, 0, 0, 0);
 
     for (
@@ -713,7 +1048,7 @@ function buildGanttActivityGradient(entry) {
     ) {
         const dayKey = formatLocalDateKey(date);
         const dayMs = date.getTime();
-        const posPct = Math.max(0,Math.min(100, ((dayMs - entry.startMs) / spanMs) * 100));
+        const posPct = Math.max(0,Math.min(100, ((dayMs - barStartMs) / spanMs) * 100));
         const seconds = daySeconds[dayKey] || 0;
         const opacity = seconds > 0 ? 0.35 + 0.65 * (seconds / maxSeconds): 0.05; // No reading = minimum opacity
         stops.push(`rgba(255,255,255,${opacity.toFixed(2)}) ${posPct.toFixed(1)}%`);
@@ -744,12 +1079,23 @@ function showGanttBarTooltip(event, index) {
         </div>
     `).join("");
 
+    // In windowed mode the visible bar is clipped to the window, but the
+    // tooltip always reports the book's real, unclipped start/end - flagged
+    // here so it's clear the bar on screen isn't necessarily the book's
+    // full reading span.
+    const isClipped = typeof entry.clampedStartMs === "number"
+        && (entry.clampedStartMs > entry.startMs || entry.clampedEndMs < entry.endMs);
+    const clippedNotice = isClipped
+        ? `<div class="calendar-day-tooltip-row calendar-day-tooltip-book-meta">✂️ Bar clipped to the current time window</div>`
+        : "";
+
     tooltip.innerHTML = `
         <div class="calendar-day-tooltip-heading">${escapeHtml(entry.book.title)}</div>
         <div class="calendar-day-tooltip-row calendar-day-tooltip-book-meta">${escapeHtml(READING_STATUS_LABELS[entry.status])}</div>
         <div class="calendar-day-tooltip-row calendar-day-tooltip-book-meta">Started: ${escapeHtml(startLabel)}</div>
         <div class="calendar-day-tooltip-row calendar-day-tooltip-book-meta">${endRowLabel}: ${escapeHtml(endLabel)}</div>
         <div class="calendar-day-tooltip-row calendar-day-tooltip-book-meta">Span: ${escapeHtml(spanLabel)}</div>
+        ${clippedNotice}
         ${pauseRows}
     `;
     positionFlyoutMenu(tooltip, event);
