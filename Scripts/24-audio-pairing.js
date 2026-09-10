@@ -230,7 +230,7 @@ async function activatePairedAudio(bookId, file) {
   activeAudioBookId = bookId;
   document.getElementById("audio-pairing-transport").style.display = "flex";
   await restoreOwnListeningPosition(bookId);
-  await maybePromptSyncAudioToReading(bookId);
+  await promptSyncAudioToReading(bookId);
   refreshActiveBookAudioPairingCache(bookId);
   const audiobook = await getAudiobookForBook(bookId);
   cachedAudioDisplayBook = { bookId, audiobook };
@@ -244,7 +244,7 @@ async function activatePairedAudio(bookId, file) {
  Safe to call from any pairing entry point; silently no-ops otherwise.
  @param {number} bookId
 */
-async function maybePromptSyncAudioToReading(bookId) {
+async function promptSyncAudioToReading(bookId) {
   if (!activeAudioElement || activeAudioBookId !== bookId) return;
   if (syncPromptHandled.has(bookId)) return;
   syncPromptHandled.add(bookId);
@@ -308,7 +308,7 @@ async function openAudioPairingPanel(bookId) {
   // FIX: was `if (activeAudioElement && existing) promptSyncAudioToReading(bookId)`
   // - the wrong-book seek described on activeAudioBookId, plus re-prompt spam.
   // The wrapper checks ownership and once-per-session.
-  await maybePromptSyncAudioToReading(bookId);
+  await promptSyncAudioToReading(bookId);
 }
 
 function closeAudioPairingPanel() {
@@ -1154,7 +1154,29 @@ async function restoreOwnListeningPosition(bookId) {
   if (!audiobook || !activeAudioElement) return;
   const position = await getAudioSyncPosition(bookId);
   if (!position) return;
-  const seconds = chapterPositionToSeconds(audiobook.chapters, position.chapterIndex, position.percentInChapter);
+
+  let seconds;
+  if (position.lastMode === "listening") {
+    seconds = chapterPositionToSeconds(
+      audiobook.chapters, position.chapterIndex, position.percentInChapter
+    );
+  } else {
+    const chapterPos = mapScrollToChapter({
+      mode: audiobook.syncMode || "chapter",
+      chapterOffset: resolveChapterOffset(audiobook),
+      epubSpineIndex: position.chapterIndex,
+      innerPct: position.percentInChapter,
+      audiobook,
+      chapterWordCounts: [],
+      totalWords: 0,
+      wholeBookOffset: audiobook.wholeBookOffset || 0,
+    });
+    if (!chapterPos) return;
+    seconds = chapterPositionToSeconds(
+      audiobook.chapters, chapterPos.audioChapterIndex, chapterPos.percentInChapter
+    );
+  }
+
   if (seconds != null && Number.isFinite(seconds) && seconds > 1) seekAudio(seconds);
 }
 
