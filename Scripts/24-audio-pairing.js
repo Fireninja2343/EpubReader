@@ -79,22 +79,15 @@ async function pairAudiobookFile(bookId, file, handle) {
 }
 
 /**
- Attempts one-click resume for the current auto-resume-eligible audiobook:
- re-requests permission on its stored file handle (requires a user gesture,
- e.g. a "Resume Listening" button click - browsers won't grant this silently)
- and, if granted, returns the live File ready for use.
+ Attempts one-click resume for a given book, or for the global last-audio
+ context when no target is supplied.
 
- FIX: now also returns the handle itself, so the mismatch-Continue path can
- re-pair WITHOUT dropping handle-based one-click resume (the old resume flow
- passed handle: null into showMismatchTable, so accepting a changed file
- silently downgraded that book to manual re-pick forever).
-
- @returns {Promise<{bookId: number, file: File, handle: FileSystemFileHandle}|null>} Null if there's no
-   eligible book, no stored handle (e.g. unsupported browser or never picked
-   with a handle), or permission was denied.
+ @param {number|null} [targetBookId=null] - Book to resume; if null/undefined,
+   falls back to the stored global last-audio context.
+ @returns {Promise<{bookId: number, file: File, handle: FileSystemFileHandle}|null>}
 */
-async function tryAutoResumeAudio() {
-  const bookId = await getLastAudioContext();
+async function tryAutoResumeAudio(targetBookId = null) {
+  const bookId = targetBookId != null ? targetBookId : await getLastAudioContext();
   if (bookId == null) return null;
 
   const audiobook = await getAudiobookForBook(bookId);
@@ -106,8 +99,6 @@ async function tryAutoResumeAudio() {
     const file = await audiobook.fileHandle.getFile();
     return { bookId, file, handle: audiobook.fileHandle };
   } catch (err) {
-    // Handle may be stale (file moved/deleted, or a permission API quirk on
-    // this browser) - treat as "can't auto-resume", not a hard error.
     console.warn("[24-audio-pairing] Auto-resume failed:", err);
     return null;
   }
@@ -365,7 +356,7 @@ async function handlePairAudiobookClick() {
  mismatch table so Continue keeps one-click resume working.
 */
 async function handleResumeListeningClick() {
-  const resumed = await tryAutoResumeAudio();
+  const resumed = await tryAutoResumeAudio(audioPairingTargetBookId);
   if (!resumed) {
     document.getElementById("audio-pairing-status").textContent =
       "Couldn't auto-resume - please re-select the file.";
@@ -689,6 +680,81 @@ function findEpubChapterForPct(pct, chapterWordCounts, totalWords) {
 // -----------------------------------------------------------------
 // CHAPTER CALIBRATION
 // -----------------------------------------------------------------
+/**
+ Extracts the spine array + chapter titles for a book WITHOUT loading it
+ into the reader. Calibration needs the EPUB's chapter list, but the reader
+ is a whole separate context (closes any active session, swaps globals) -
+ pulling the spine data locally keeps calibration self-contained.
+
+ Uses the live reader state only when the target book happens to already
+ be the one open (same data the sync loop uses, no reparse). Otherwise
+ parses the EPUB directly from the book's stored fileData.
+
+ @param {number} bookId
+ @returns {Promise<{spineArray: string[], chapterTitles: string[]}|null>}
+   Null when the book record or fileData is missing, or the EPUB can't be parsed.
+*/
+async function extractSpineAndTitlesForCalibration(bookId) {
+  if (activeBookObject && activeBookObject.id === bookId && activeSpineArray.length > 0) {
+    return {
+      spineArray: activeSpineArray.slice(),
+      chapterTitles: activeChapterTitles.slice(),
+    };
+  }
+
+  const book = await getBookById(bookId);
+  if (!book || !book.fileData) return null;
+
+  try {
+    const zip = await JSZip.loadAsync(book.fileData);
+    const { opfDoc, baseDir } = await openEpubContainer(zip);
+
+    const manifestItems = {};
+    opfDoc.querySelectorAll("manifest > item").forEach((item) => {
+      manifestItems[item.getAttribute("id")] = normalizePath(
+        baseDir + item.getAttribute("href"),
+      );
+    });
+    const spineArray = [];
+    opfDoc.querySelectorAll("spine > itemref").forEach((ref) => {
+      const idref = ref.getAttribute("idref");
+      if (manifestItems[idref]) spineArray.push(manifestItems[idref]);
+    });
+    if (spineArray.length === 0) return null;
+
+    const chapterTitles = spineArray.map((_, idx) => `Chapter ${idx + 1}`);
+    const tocItem =
+      opfDoc.querySelector("item[media-type='application/x-dtbncx+xml']") ||
+      opfDoc.querySelector("item[properties='nav']");
+    if (tocItem) {
+      try {
+        const tocPath = normalizePath(baseDir + tocItem.getAttribute("href"));
+        const tocFileStr = await zip.file(tocPath).async("string");
+        const tocDoc = new DOMParser().parseFromString(tocFileStr, "text/xml");
+        tocDoc.querySelectorAll("navPoint, li").forEach((node) => {
+          const labelNode = node.querySelector("navLabel > text, a, span");
+          const contentNode = node.querySelector("content, a");
+          if (!labelNode || !contentNode) return;
+          const text = labelNode.textContent.trim();
+          let href = contentNode.getAttribute("src") || contentNode.getAttribute("href");
+          if (!href) return;
+          href = href.split("#")[0];
+          const absPath = normalizePath(baseDir + href);
+          const idx = spineArray.indexOf(absPath);
+          if (idx !== -1) chapterTitles[idx] = text;
+        });
+      } catch (e) {
+        console.warn("[24-audio-pairing] TOC parse failed; falling back to default labels:", e);
+      }
+    }
+
+    return { spineArray, chapterTitles };
+  } catch (err) {
+    console.warn("[24-audio-pairing] EPUB parse for calibration failed:", err);
+    return null;
+  }
+}
+
 /*
  Two-pane picker: click one EPUB chapter, click one audio chapter, save. The
  difference between their indices becomes chapterOffset. Requires the book
@@ -719,23 +785,7 @@ async function openCalibrationModal(bookId) {
   const audioList = document.getElementById("calibration-audio-list");
   const statusEl = document.getElementById("calibration-status");
 
-  if (!activeBookObject || activeBookObject.id !== bookId || activeSpineArray.length === 0) {
-    epubList.innerHTML = "<p>Open this book in the reader first to calibrate.</p>";
-    audioList.innerHTML = "";
-    statusEl.textContent = "";
-    document.getElementById("audio-calibration-modal").style.display = "flex";
-    return;
-  }
-
-  epubList.innerHTML = "";
-  activeSpineArray.forEach((_, idx) => {
-    const row = document.createElement("div");
-    row.textContent = `${idx + 1}. ${activeChapterTitles[idx] ?? `Chapter ${idx + 1}`}`;
-    row.style.cursor = "pointer";
-    row.onclick = () => selectCalibrationEpubChapter(idx, row);
-    epubList.appendChild(row);
-  });
-
+  // Audio list is self-contained - populate immediately.
   audioList.innerHTML = "";
   audiobook.chapters.forEach((ch, idx) => {
     const row = document.createElement("div");
@@ -745,10 +795,28 @@ async function openCalibrationModal(bookId) {
     audioList.appendChild(row);
   });
 
-  statusEl.textContent = "Select one chapter from each side.";
+  // EPUB list needs a parse - show a loading state, then fill in.
+  epubList.innerHTML = "<p>Loading EPUB chapters…</p>";
+  statusEl.textContent = "";
   document.getElementById("audio-calibration-modal").style.display = "flex";
-}
 
+  const extracted = await extractSpineAndTitlesForCalibration(bookId);
+  if (!extracted) {
+    epubList.innerHTML = "<p>Couldn't read this book's EPUB structure. The file may be missing or corrupted.</p>";
+    return;
+  }
+
+  epubList.innerHTML = "";
+  extracted.spineArray.forEach((_, idx) => {
+    const row = document.createElement("div");
+    row.textContent = `${idx + 1}. ${extracted.chapterTitles[idx] ?? `Chapter ${idx + 1}`}`;
+    row.style.cursor = "pointer";
+    row.onclick = () => selectCalibrationEpubChapter(idx, row);
+    epubList.appendChild(row);
+  });
+
+  statusEl.textContent = "Select one chapter from each side.";
+}
 /**
  Marks an EPUB chapter row as selected (visually and in state). Deselects
  any previously-selected row in the same list first, so only one can be
