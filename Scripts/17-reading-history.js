@@ -166,14 +166,14 @@ function estimateHistoryPagesRead(book, chapterStart, chapterEnd) {
 
 /**
  Builds a map of localDayKey ("YYYY-MM-DD") -> { totalSeconds, totalPagesEstimate, books: { [bookId]: { title,
- secondsSpent, chapterStart, chapterEnd, pagesEstimate } } } across every book's readingHistory. This is the
- single source of truth the calendar heatmap (and its hover popup) render from - total reading time per day
- and estimated pages read per day both fall straight out of it with no separate calculation path needed.
-
+ secondsSpent, chapterStart, chapterEnd, pagesEstimate } } } across every book's readingHistory.
+ This is the single source of truth the calendar heatmap (and its hover popup) render from.
+ 
  @param {Array<Object>} books - The books to aggregate readingHistory from.
+ @param {string|null} [modeFilter=null] - If 'reading' or 'listening', only include entries with that mode.
  @returns {Object<string, Object>} Map of local day key to that day's totals.
  */
-function aggregateReadingHistoryByLocalDay(books) {
+function aggregateReadingHistoryByLocalDay(books, modeFilter = null) {
     const byDay = {};
 
     for (const book of books) {
@@ -181,6 +181,10 @@ function aggregateReadingHistoryByLocalDay(books) {
 
         for (const entry of book.readingHistory) {
             if (!entry || typeof entry.startTimestamp !== "number" || typeof entry.endTimestamp !== "number") continue;
+
+            // Filter by mode if requested
+            const entryMode = entry.mode || 'reading'; // default for old entries
+            if (modeFilter !== null && entryMode !== modeFilter) continue;
 
             for (const slice of splitHistoryEntryAcrossLocalDays(entry)) {
                 if (slice.secondsSpent <= 0) continue;
@@ -209,9 +213,7 @@ function aggregateReadingHistoryByLocalDay(books) {
     }
 
     // Pages-per-day is derived once per book/day after all of that book's
-    // slices for the day have been merged, rather than per-slice, so a
-    // session split across midnight doesn't double-count a partial chapter
-    // on both sides.
+    // slices for the day have been merged, rather than per-slice.
     for (const dayKey of Object.keys(byDay)) {
         const dayBucket = byDay[dayKey];
         for (const bookId of Object.keys(dayBucket.books)) {
@@ -390,7 +392,7 @@ function renderReadingActivityCalendar() {
 
     ensureHeatmapResizeObserver(container);
 
-    const byDay = aggregateReadingHistoryByLocalDay(loadedBooksMemory);
+    const byDay = aggregateReadingHistoryByLocalDay(loadedBooksMemory, 'reading');
     const dayKeys = Object.keys(byDay);
 
     if (dayKeys.length === 0) {
@@ -477,7 +479,7 @@ function showHistoryDayTooltip(event, dayKey) {
     const tooltip = document.getElementById("calendar-day-tooltip");
     if (!tooltip) return;
 
-    const byDay = aggregateReadingHistoryByLocalDay(loadedBooksMemory);
+    const byDay = aggregateReadingHistoryByLocalDay(loadedBooksMemory, 'reading');
     const dayBucket = byDay[dayKey];
 
     const bookRows = dayBucket

@@ -18,56 +18,82 @@ const READING_STATUS_LABELS = {
     [READING_STATUS.NOT_STARTED]: "⬜ Not Started",
 };
 
+const MERGE_TIME_DOMINANCE_RATIO = Config.Miscellaneous.MERGE_TIME_DOMINANCE_RATIO ;
 /**
- Timestamp of the most recent real activity, or null.  
- Prefers readingSessions/readingHistory over the coarser lastOpened, which updates the instant the reader opens even with zero real reading.
+ Merges reading and listening time for a book, applying the dominance rule:
+ - If one mode is >ratioThreshold%(65%) of total, return that mode's time (ignore the other).
+ - If one mode is <1 - ratioThreshold%(35%) of total, return the other mode's time.
+ - Otherwise, return the average.
+ @param {number|null|undefined} readingSec - Seconds spent reading (or 0 if none).
+ @param {number|null|undefined} listeningSec - Seconds spent listening (or 0 if none).
+ @returns {number} Merged seconds (0 if both are falsy).
+*/
+function mergeReadingAndListeningTime(readingSec, listeningSec) {
+    const r = readingSec || 0;
+    const l = listeningSec || 0;
+    if (r === 0 && l === 0) return 0;
+    if (r === 0) return l;
+    if (l === 0) return r;
+    const total = r + l;
+    const ratio = r / total;
+    if (ratio > MERGE_TIME_DOMINANCE_RATIO) return r;
+    if (ratio < 1 - MERGE_TIME_DOMINANCE_RATIO) return l;
+    return total / 2;
+}
+
+/**
+ Checks if a book has any real reading or listening activity (i.e., at least one
+ recorded session or history entry).
+ @param {Object} book - The book record.
+ @returns {boolean} True if there is at least one session or history entry.
+*/
+function hasRealActivity(book) {
+    const sessions = Array.isArray(book.readingSessions) ? book.readingSessions : [];
+    const history = Array.isArray(book.readingHistory) ? book.readingHistory : [];
+    return sessions.length > 0 || history.length > 0;
+}
+
+/**
+ Gets the timestamp of the most recent real activity (reading or listening) from
+ sessions or history.
+ @param {Object} book - The book record.
+ @returns {number|null} The latest end timestamp, or null if none.
  */
-function getLastRealReadingActivityTimestamp(book) {
+function getLastRealActivityTimestamp(book) {
     let latest = null;
-
-    if (Array.isArray(book.readingSessions)) {
-        for (const session of book.readingSessions) {
-            if (typeof session.end === "number" && (latest === null || session.end > latest)) {
-                latest = session.end;
-            }
+    const sessions = Array.isArray(book.readingSessions) ? book.readingSessions : [];
+    const history = Array.isArray(book.readingHistory) ? book.readingHistory : [];
+    for (const session of sessions) {
+        if (typeof session.end === 'number' && (latest === null || session.end > latest)) {
+            latest = session.end;
         }
     }
-
-    if (Array.isArray(book.readingHistory)) {
-        for (const entry of book.readingHistory) {
-            if (typeof entry.endTimestamp === "number" && (latest === null || entry.endTimestamp > latest)) {
-                latest = entry.endTimestamp;
-            }
+    for (const entry of history) {
+        if (typeof entry.endTimestamp === 'number' && (latest === null || entry.endTimestamp > latest)) {
+            latest = entry.endTimestamp;
         }
     }
-
     return latest;
 }
 
-/** True if the book has at least one recorded real reading session/segment. */
-function hasRealReadingActivity(book) {
-    return (Array.isArray(book.readingSessions) && book.readingSessions.length > 0)
-        || (Array.isArray(book.readingHistory) && book.readingHistory.length > 0);
-}
-
 /**
- Main classifier. `now` is a parameter so a caller classifying a whole list at once can use one consistent
- timestamp instead of many.
+ Main status classifier. Uses `hasRealActivity` and `getLastRealActivityTimestamp`
+ to decide between NOT_STARTED, IN_PROGRESS, PAUSED, or COMPLETED.
+ @param {Object} book - The book record.
+ @param {number} [now=Date.now()] - The current timestamp for inactivity calculation.
+ @returns {string} One of READING_STATUS values.
  */
 function getBookReadingStatus(book, now = Date.now()) {
     if (book.isRead) return READING_STATUS.COMPLETED;
-    if (!hasRealReadingActivity(book)) return READING_STATUS.NOT_STARTED;
-
-    const lastActivity = getLastRealReadingActivityTimestamp(book);
-    // Has activity but no valid end timestamp (malformed data) - treat as
-    // in-progress rather than crash on a null subtraction below.
+    if (!hasRealActivity(book)) return READING_STATUS.NOT_STARTED;
+    const lastActivity = getLastRealActivityTimestamp(book);
     if (lastActivity === null) return READING_STATUS.IN_PROGRESS;
-
     const idleFor = now - lastActivity;
     return idleFor >= Config.Reading.PAUSED_INACTIVITY_THRESHOLD_MS
         ? READING_STATUS.PAUSED
         : READING_STATUS.IN_PROGRESS;
 }
+
 
 // =================================================================
 // SHARED STORAGE / DB HELPERS

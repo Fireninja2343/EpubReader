@@ -64,6 +64,11 @@ const Config = {
       PAUSED: "paused",
       NOT_STARTED: "notStarted",
     },
+    STATS_MODE: {
+      COMBINED: "combined",
+      READING: "reading",
+      AUDIO: "audio",
+    },
     READER_BUTTON_ELEMENT_MAP: {
       toc: "btn-toggle-toc",
       prev: "btn-prev-chapter",
@@ -88,6 +93,7 @@ const Config = {
     VERY_HIGH_THRESHOLD_PERCENT: 75,
     NOTE_SELECTION_BUTTON_TOUCH_OFFSET_PX: 10,
     MIN_CHAPTER_TICK_GAP_PX: 4,
+    MERGE_TIME_DOMINANCE_RATIO: 0.65,
   },
   Timelines: {
     GANTT_SCROLL_PX_PER_DAY: 32,

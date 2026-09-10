@@ -63,6 +63,24 @@
     margin-top: 20px;
 }
 
+.stats-mode-selector {
+    display: flex;
+    gap: 6px;
+    margin: 0 12px;
+}
+.stats-mode-btn {
+    background: var(--bg-card);
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 12px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.15s ease-in-out;
+}
+.stats-mode-btn:hover { border-color: var(--accent); color: var(--text-main); }
+.stats-mode-btn.active { background: var(--accent-dim); border-color: var(--accent); color: var(--accent); font-weight: 600; }
+
 /* Legacy month-by-month row from 09-stats-and-context-menu.js,
    superseded by 14-completion-timeline.js's multi-mode system.
    Kept for whichever ends up wired into index.html. */

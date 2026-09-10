@@ -16,6 +16,9 @@
 let activeAudioElement = null;
 let activeAudioObjectUrl = null;
 
+let lastListeningPositionRecordTime = 0;
+const LISTENING_POSITION_RECORD_INTERVAL_MS = 5000; // record at most every 5 seconds during playback
+
 /**
  Loads an M4B file into a fresh <audio> element, replacing any previously
  loaded one. Revokes the prior object URL (if any) to avoid leaking memory
@@ -37,9 +40,25 @@ function loadM4bAudio(file) {
   activeAudioElement = new Audio(activeAudioObjectUrl);
   activeAudioElement.preload = "metadata";
 
+  // Attach timeupdate listener to record position periodically while playing
+  activeAudioElement.addEventListener('timeupdate', () => {
+      const now = Date.now();
+      if (now - lastListeningPositionRecordTime >= LISTENING_POSITION_RECORD_INTERVAL_MS) {
+          lastListeningPositionRecordTime = now;
+          // Only record if we have an active book
+          if (activeBookObject && activeBookObject.id) {
+              recordListeningPosition(activeBookObject.id);
+          }
+      }
+  });
+
   activeAudioElement.onerror = () => {
     console.error("[23-audio-player] Audio element error:", activeAudioElement.error);
   };
+
+  if (typeof attachListeningEventListeners === 'function') {
+    attachListeningEventListeners();
+  }
 
   return activeAudioElement;
 }
@@ -60,8 +79,12 @@ function playAudio() {
  Pauses the currently loaded audio. No-op if nothing is loaded.
 */
 function pauseAudio() {
-  if (!activeAudioElement) return;
-  activeAudioElement.pause();
+    if (!activeAudioElement) return;
+    activeAudioElement.pause();
+    // Record position on explicit pause
+    if (activeBookObject && activeBookObject.id) {
+        recordListeningPosition(activeBookObject.id);
+    }
 }
 
 /**

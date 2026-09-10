@@ -23,6 +23,66 @@ let syncUserOffsetPx = 0;
 const SYNC_TICK_MS = 2500;
 
 /**
+ Records the current listening position for a book in the shared sync store.
+ Reads the audio element's currentTime and the book's chapter list to determine
+ the chapter index and percent within that chapter.
+ 
+ @param {number} bookId - The book's ID.
+ @param {Object} [options] - Optional explicit position.
+ @param {number} [options.chapterIndex] - If provided, uses this instead of computing.
+ @param {number} [options.percentInChapter] - If provided, uses this instead of computing.
+ @returns {Promise<void>}
+ */
+async function recordListeningPosition(bookId, options = {}) {
+    if (!bookId) return;
+    if (!activeAudioElement) return;
+
+    let chapterIndex = options.chapterIndex;
+    let percentInChapter = options.percentInChapter;
+
+    // If explicit values were passed, use them directly
+    if (chapterIndex !== undefined && percentInChapter !== undefined) {
+        // Clamp and write
+        const audiobook = await getAudiobookForBook(bookId);
+        const maxChapter = audiobook?.chapters?.length ? audiobook.chapters.length - 1 : 0;
+        chapterIndex = Math.max(0, Math.min(chapterIndex, maxChapter));
+        percentInChapter = Math.max(0, Math.min(1, percentInChapter || 0));
+        await updateAudioSyncPosition(bookId, {
+            chapterIndex,
+            percentInChapter,
+            userOffsetPx: syncUserOffsetPx || 0,
+            lastMode: 'listening',
+        });
+        return;
+    }
+
+    // Otherwise compute from current time
+    const audiobook = await getAudiobookForBook(bookId);
+    if (!audiobook || !audiobook.chapters || audiobook.chapters.length === 0) {
+        // No chapters – we can't map time to a chapter.
+        console.warn("[recordListeningPosition] No chapters found for book", bookId);
+        return;
+    }
+
+    const currentTime = activeAudioElement.currentTime || 0;
+    const chapterPos = secondsToChapterPosition(audiobook.chapters, currentTime);
+    if (!chapterPos) {
+        console.warn("[recordListeningPosition] Could not map time", currentTime, "to chapter for book", bookId);
+        return;
+    }
+
+    chapterIndex = Math.max(0, Math.min(chapterPos.audioChapterIndex, audiobook.chapters.length - 1));
+    percentInChapter = Math.max(0, Math.min(1, chapterPos.percentInChapter || 0));
+
+    await updateAudioSyncPosition(bookId, {
+        chapterIndex,
+        percentInChapter,
+        userOffsetPx: syncUserOffsetPx || 0,
+        lastMode: 'listening',
+    });
+}
+
+/**
  True between a sync tick arming its scrollBy() and the resulting scroll
  event being consumed by handleSyncScrollEvent() - events in this window are
  sync-caused, not user input. The handler CONSUMES the lock; there is

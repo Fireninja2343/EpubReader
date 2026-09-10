@@ -572,19 +572,20 @@ function recordReadingSessionStart(bookId) {
  @param {number} bookId - id of the book the session belongs to.
  @param {Object} sessionRecord - Session data to append; expects durationSeconds and
    pagesRead fields for the noise check above.
+ @param {string} [mode='reading'] - 'reading' or 'listening'.
  @returns {Promise<boolean>} True if the session was accepted and persisted, false if it
    was discarded as noise or the book wasn't found.
 */
-function appendReadingSession(bookId, sessionRecord) {
+function appendReadingSession(bookId, sessionRecord, mode = 'reading') {
   if (!bookId || !db || !sessionRecord) return Promise.resolve(false);
   const duration = sessionRecord.durationSeconds || 0;
   const pages = sessionRecord.pagesRead || 0;
   const impliedPagesPerHour = duration > 0 ? (pages / (duration / 3600)) : 0;
-  const isNoise = duration < 30
-    || impliedPagesPerHour > Config.Reading.MAX_PLAUSIBLE_PAGES_PER_HOUR
-    || impliedPagesPerHour < Config.Reading.MIN_PLAUSIBLE_PAGES_PER_HOUR;
+  const isNoise = duration < 30 || (mode !== 'listening' && (
+    impliedPagesPerHour > Config.Reading.MAX_PLAUSIBLE_PAGES_PER_HOUR || impliedPagesPerHour < Config.Reading.MIN_PLAUSIBLE_PAGES_PER_HOUR
+  ));
   if (isNoise) {
-    console.log(`[02-db] Discarded noise session (${duration}s, ${pages} pages read, ${impliedPagesPerHour.toFixed(1)} p/h)`);
+    console.log(`[02-db] Discarded noise ${mode} session (${duration}s, ${pages} pages read, ${impliedPagesPerHour.toFixed(1)} p/h)`);
     return Promise.resolve(false);
   }
   return new Promise((resolve) => {
@@ -595,7 +596,9 @@ function appendReadingSession(bookId, sessionRecord) {
       const record = e.target.result;
       if (record) {
         if (!Array.isArray(record.readingSessions)) record.readingSessions = [];
-        record.readingSessions.push(sessionRecord);
+        // Add the mode to the session record
+        const sessionWithMode = { ...sessionRecord, mode };
+        record.readingSessions.push(sessionWithMode);
         const cap = Config.Reading.MAX_STORED_SESSIONS_PER_BOOK;
         if (record.readingSessions.length > cap) {
           record.readingSessions = record.readingSessions.slice(-cap);
@@ -618,6 +621,16 @@ function appendReadingSession(bookId, sessionRecord) {
     };
     transaction.onerror = () => resolve(false);
   });
+}
+
+/**
+ Thin wrapper around appendReadingSession for listening sessions.
+ @param {number} bookId - id of the book the session belongs to.
+ @param {Object} sessionRecord - Same shape as appendReadingSession expects.
+ @returns {Promise<boolean>}
+*/
+function appendListeningSession(bookId, sessionRecord) {
+  return appendReadingSession(bookId, sessionRecord, 'listening');
 }
 
 /**
@@ -717,6 +730,7 @@ function pairAudiobook(bookId, metadata) {
         syncMode: existing.syncMode ?? null,
         // Whole-book offset as fraction (e.g. 0.05 = +5%). Used only when syncMode === "whole".
         wholeBookOffset: existing.wholeBookOffset ?? 0,
+        lastModified: Date.now(),
       };
       store.put(record);
     };
@@ -742,6 +756,7 @@ function setAudiobookChapterOffset(bookId, offset) {
       const record = e.target.result;
       if (record) {
         record.chapterOffset = offset;
+        record.lastModified = Date.now();
         store.put(record);
       }
     };
@@ -766,6 +781,30 @@ function setAudiobookSyncMode(bookId, mode, offset = 0) {
       if (record) {
         record.syncMode = mode;
         record.wholeBookOffset = offset;
+        record.lastModified = Date.now();
+        store.put(record);
+      }
+    };
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error);
+  });
+}
+
+/**
+ Sets the playback speed preference for a paired audiobook.
+ @param {number} bookId - id of the book.
+ @param {number} speed - playback speed multiplier (e.g. 1.0, 1.5).
+ @returns {Promise<void>}
+*/
+function setAudiobookPlaybackSpeed(bookId, speed) {
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction([STORE_AUDIOBOOKS], "readwrite");
+    const store = transaction.objectStore(STORE_AUDIOBOOKS);
+    store.get(bookId).onsuccess = (e) => {
+      const record = e.target.result;
+      if (record) {
+        record.playbackSpeed = speed;
+        record.lastModified = Date.now();
         store.put(record);
       }
     };
