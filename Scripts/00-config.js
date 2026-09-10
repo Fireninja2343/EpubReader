@@ -25,7 +25,7 @@ const Config = {
   },
   Sync: {
     // Master kill switch for all Firebase reads/writes, SET TO TRUE to resume sync
-    SYNC_ACTIVE: false,
+    SYNC_ACTIVE: true,
     FILE_CHUNK_SIZE: 700000,
     CLOUD_PROGRESS_PUSH_INTERVAL_MS: 30000,
     IDLE_THRESHOLD_MS: 20000,

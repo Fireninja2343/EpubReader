@@ -236,14 +236,25 @@ function promptHardPull() {
 async function hardPullFromCloud() {
   if (!currentUser) throw new Error("Not signed in.");
 
-  // Fetch everything from the cloud FIRST, before touching local data, so a network failure here
-  // leaves local data completely untouched instead of wiping it out and then failing to repopulate it.
-  const [booksSnap, groupsSnap, notesSnap, noteTagsSnap, userSnap] = await Promise.all([
+  // Fetch everything from the cloud FIRST, before touching local data, so a
+  // network failure here leaves local data completely untouched instead of
+  // wiping it out and then failing to repopulate it.
+  const [
+    booksSnap,
+    groupsSnap,
+    notesSnap,
+    noteTagsSnap,
+    userSnap,
+    audiobooksSnap,
+    positionsSnap,
+  ] = await Promise.all([
     booksCollection().get(),
     groupsCollection().get(),
     notesCollection().get(),
     noteTagsCollection().get(),
     userDoc().get(),
+    audiobooksCollection().get(),
+    audioPositionsCollection().get(),
   ]);
 
   // Wipe local only once the cloud read has actually succeeded.
@@ -264,8 +275,6 @@ async function hardPullFromCloud() {
   for (const docSnap of booksSnap.docs) {
     const bookId = Number(docSnap.id);
     const remote = docSnap.data();
-    // downloadBookFromCloud() already writes the full record - progress, sessions, reading history,
-    // cached metadata, sort order, everything - and pulls/reassembles the chunked file binary.
     await downloadBookFromCloud(bookId, remote);
   }
 
@@ -277,7 +286,12 @@ async function hardPullFromCloud() {
 
     noteTagsSnap.forEach((docSnap) => {
       const remote = docSnap.data();
-      tagsStore.put({ id: Number(docSnap.id), name: remote.name, color: remote.color });
+      tagsStore.put({
+        id: Number(docSnap.id),
+        name: remote.name,
+        color: remote.color,
+        lastModified: remote.lastModified || 0,
+      });
     });
 
     notesSnap.forEach((docSnap) => {
@@ -290,9 +304,52 @@ async function hardPullFromCloud() {
         bookId: remote.bookId ?? null,
         bookTitle: remote.bookTitle ?? null,
         dateCreated: remote.dateCreated ?? Date.now(),
+        lastModified: remote.lastModified || 0,
       });
     });
 
+    tx.oncomplete = resolve;
+    tx.onerror = () => reject(tx.error);
+  });
+
+  // --- Audiobooks (pairing metadata, calibration, sync mode, playback speed) ---
+  await new Promise((resolve, reject) => {
+    const tx = db.transaction([STORE_AUDIOBOOKS], "readwrite");
+    const store = tx.objectStore(STORE_AUDIOBOOKS);
+    audiobooksSnap.forEach((docSnap) => {
+      const remote = docSnap.data();
+      store.put({
+        bookId: Number(docSnap.id),
+        title: remote.title ?? null,
+        author: remote.author ?? null,
+        duration: remote.duration ?? 0,
+        chapters: remote.chapters ?? [],
+        chapterOffset: remote.chapterOffset ?? null,
+        syncMode: remote.syncMode ?? null,
+        wholeBookOffset: remote.wholeBookOffset ?? 0,
+        playbackSpeed: remote.playbackSpeed ?? 1,
+        lastModified: remote.lastModified || 0,
+      });
+    });
+    tx.oncomplete = resolve;
+    tx.onerror = () => reject(tx.error);
+  });
+
+  // --- Shared reading/listening positions ---
+  await new Promise((resolve, reject) => {
+    const tx = db.transaction([STORE_AUDIO_SYNC_POSITION], "readwrite");
+    const store = tx.objectStore(STORE_AUDIO_SYNC_POSITION);
+    positionsSnap.forEach((docSnap) => {
+      const remote = docSnap.data();
+      store.put({
+        bookId: Number(docSnap.id),
+        chapterIndex: remote.chapterIndex ?? 0,
+        percentInChapter: remote.percentInChapter ?? 0,
+        userOffsetPx: remote.userOffsetPx ?? 0,
+        lastMode: remote.lastMode ?? "reading",
+        lastUpdated: remote.lastUpdated || 0,
+      });
+    });
     tx.oncomplete = resolve;
     tx.onerror = () => reject(tx.error);
   });
@@ -315,8 +372,21 @@ async function hardPullFromCloud() {
     }
   }
 
-  // Refresh every in-memory cache + on-screen view from the freshly rebuilt local database, same as
-  // what happens after a normal sign-in sync.
+  // --- lastAudioContext (which book gets one-click auto-resume on this device) ---
+  const remoteLastAudioContext = remoteUserData && remoteUserData.lastAudioContext;
+  if (remoteLastAudioContext && remoteLastAudioContext.bookId != null) {
+    await new Promise((resolve) => {
+      const tx = db.transaction([STORE_LAST_AUDIO_CONTEXT], "readwrite");
+      tx.objectStore(STORE_LAST_AUDIO_CONTEXT).put({
+        key: LAST_AUDIO_CONTEXT_KEY,
+        bookId: remoteLastAudioContext.bookId,
+        lastModified: remoteLastAudioContext.lastModified || Date.now(),
+      });
+      tx.oncomplete = resolve;
+    });
+  }
+
+  // Refresh every in-memory cache + on-screen view from the freshly rebuilt local database.
   fetchLocalLibrary();
   if (typeof fetchNotesLibrary === "function") fetchNotesLibrary();
   if (typeof collapsedNoteTagKeys !== "undefined" && typeof loadCollapsedNoteTagKeys === "function") {
@@ -361,29 +431,43 @@ function promptHardPush() {
 async function hardPushToCloud() {
   if (!currentUser) throw new Error("Not signed in.");
 
-  // Read current cloud doc ids up front so we know what to delete once the fresh push is written
-  // (id sets, not full docs - keeps this cheap).
-  const [existingBooksSnap, existingGroupsSnap, existingNotesSnap, existingNoteTagsSnap] = await Promise.all([
+  // Read current cloud doc ids up front so we know what to delete once the
+  // fresh push is written (id sets, not full docs - keeps this cheap).
+  const [
+    existingBooksSnap,
+    existingGroupsSnap,
+    existingNotesSnap,
+    existingNoteTagsSnap,
+    existingAudiobooksSnap,
+    existingPositionsSnap,
+    existingUserSnap,
+  ] = await Promise.all([
     booksCollection().get(),
     groupsCollection().get(),
     notesCollection().get(),
     noteTagsCollection().get(),
+    audiobooksCollection().get(),
+    audioPositionsCollection().get(),
+    userDoc().get(),
   ]);
 
-  /*
-   Reads straight from IndexedDB rather than the loadedX Memory caches, which may not be populated
-   yet this session. Trusting a stale/empty cache here wouldn't just skip pushing real data - the
-   cleanup pass below would see an empty id set and delete every matching cloud record.
-  */
+  // Reads straight from IndexedDB rather than the loadedX Memory caches, which
+  // may not be populated yet this session. Trusting a stale/empty cache here
+  // wouldn't just skip pushing real data - the cleanup pass below would see an
+  // empty id set and delete every matching cloud record.
   const localBooks = await getAllFromLocalStore(STORE_BOOKS);
   const localGroups = await getAllFromLocalStore(STORE_GROUPS);
   const localNotes = await getAllFromLocalStore(STORE_NOTES);
   const localNoteTags = await getAllFromLocalStore(STORE_NOTE_GROUPS);
+  const localAudiobooks = await getAllFromLocalStore(STORE_AUDIOBOOKS);
+  const localPositions = await getAllFromLocalStore(STORE_AUDIO_SYNC_POSITION);
 
   const localBookIds = new Set(localBooks.map((b) => b.id));
   const localGroupIds = new Set(localGroups.map((g) => g.id));
   const localNoteIds = new Set(localNotes.map((n) => n.id));
   const localNoteTagIds = new Set(localNoteTags.map((t) => t.id));
+  const localAudiobookIds = new Set(localAudiobooks.map((a) => a.bookId));
+  const localPositionIds = new Set(localPositions.map((p) => p.bookId));
 
   // --- Push every local record unconditionally ---
   for (const group of localGroups) {
@@ -399,10 +483,39 @@ async function hardPushToCloud() {
   for (const note of localNotes) {
     await pushNoteToCloud(note);
   }
+  for (const audiobook of localAudiobooks) {
+    await pushAudiobookToCloud(audiobook);
+  }
+  for (const position of localPositions) {
+    await pushAudioSyncPositionToCloud(position, true);
+  }
 
   // --- Settings/preferences: push local values as-is, last-write-wins bundle ---
   if (typeof pushNoteSettingsToCloudForced === "function") {
     await pushNoteSettingsToCloudForced();
+  }
+
+  // --- lastAudioContext: overwrite cloud with local, or clear it if local has none ---
+  const localCtx = await new Promise((resolve) => {
+    const tx = db.transaction([STORE_LAST_AUDIO_CONTEXT], "readonly");
+    tx.objectStore(STORE_LAST_AUDIO_CONTEXT).get(LAST_AUDIO_CONTEXT_KEY).onsuccess = (e) =>
+      resolve(e.target.result || null);
+  });
+  if (localCtx && localCtx.bookId != null) {
+    await userDoc().set(
+      {
+        lastAudioContext: {
+          bookId: localCtx.bookId,
+          lastModified: localCtx.lastModified || Date.now(),
+        },
+      },
+      { merge: true },
+    );
+  } else {
+    // Local has none - the cloud copy is stale and should be cleared so a
+    // fresh device doesn't try to auto-resume a book this device no longer
+    // considers the last one.
+    await userDoc().set({ lastAudioContext: null }, { merge: true });
   }
 
   // --- Delete anything on the cloud that no longer exists locally, so the
@@ -422,6 +535,14 @@ async function hardPushToCloud() {
   for (const docSnap of existingNoteTagsSnap.docs) {
     const id = Number(docSnap.id);
     if (!localNoteTagIds.has(id)) await deleteNoteTagFromCloud(id);
+  }
+  for (const docSnap of existingAudiobooksSnap.docs) {
+    const id = Number(docSnap.id);
+    if (!localAudiobookIds.has(id)) await deleteAudiobookFromCloud(id);
+  }
+  for (const docSnap of existingPositionsSnap.docs) {
+    const id = Number(docSnap.id);
+    if (!localPositionIds.has(id)) await deleteAudioSyncPositionFromCloud(id);
   }
 
   // Local data is intentionally left untouched by this whole function.

@@ -141,6 +141,12 @@ function notesCollection() {
 function noteTagsCollection() {
   return fbDb.collection("users").doc(currentUser.uid).collection("noteTags");
 }
+function audiobooksCollection() {
+  return fbDb.collection("users").doc(currentUser.uid).collection("audiobooks");
+}
+function audioPositionsCollection() {
+  return fbDb.collection("users").doc(currentUser.uid).collection("audioPositions");
+}
 /**
  Settings/preferences (the Notes page's collapsed-tag-sections layout and the last-used tag selection)
  don't need their own subcollection the way books/notes do; there's only ever one per user, so they live
@@ -442,6 +448,113 @@ async function deleteNoteTagFromCloud(tagId) {
   await noteTagsCollection().doc(String(tagId)).delete().catch(() => {});
 }
 
+async function deleteAudiobookFromCloud(bookId) {
+  if (!currentUser || bookId == null) return;
+  await audiobooksCollection().doc(String(bookId)).delete().catch(() => {});
+}
+
+async function deleteAudioSyncPositionFromCloud(bookId) {
+  if (!currentUser || bookId == null) return;
+  await audioPositionsCollection().doc(String(bookId)).delete().catch(() => {});
+}
+
+/**
+ Pushes an audiobook's metadata to Firestore, then stamps the local record with
+ the same lastModified on success so pull conflict resolution can tell which
+ side is genuinely newer.
+*/
+async function pushAudiobookToCloud(audiobook) {
+  if (!currentUser || !audiobook || audiobook.bookId == null) return;
+  const stampedLastModified = audiobook.lastModified || Date.now();
+  const succeeded = await withPushRetry(`audiobook #${audiobook.bookId}`, async () => {
+    logCloudWrite(`audiobook #${audiobook.bookId}`);
+    await audiobooksCollection()
+      .doc(String(audiobook.bookId))
+      .set(
+        {
+          title: audiobook.title ?? null,
+          author: audiobook.author ?? null,
+          duration: audiobook.duration ?? 0,
+          chapters: audiobook.chapters ?? [],
+          chapterOffset: audiobook.chapterOffset ?? null,
+          syncMode: audiobook.syncMode ?? null,
+          wholeBookOffset: audiobook.wholeBookOffset ?? 0,
+          playbackSpeed: audiobook.playbackSpeed ?? 1,
+          lastModified: stampedLastModified,
+        },
+        { merge: true },
+      );
+  });
+  if (succeeded) await stampLocalAudiobookLastModified(audiobook.bookId, stampedLastModified);
+}
+
+function stampLocalAudiobookLastModified(bookId, lastModified) {
+  // No in-memory cache array for audiobooks, so pass null for the cache arg.
+  return stampLocalRecordLastModified(STORE_AUDIOBOOKS, null, bookId, lastModified);
+}
+
+/**
+ Throttled push of a book's shared reading/listening position. force=true
+ bypasses the throttle for discrete events (pause) where the exact value
+ matters; regular timeupdate-driven writes ride the throttle.
+*/
+function pushAudioSyncPositionToCloud(position, force = false) {
+  if (!currentUser || !position || position.bookId == null) return;
+  const pushFn = async () => {
+    const stampedLastUpdated = position.lastUpdated || Date.now();
+    await withPushRetry(`audio position #${position.bookId}`, async () => {
+      logCloudWrite(`audio position #${position.bookId}`);
+      await audioPositionsCollection()
+        .doc(String(position.bookId))
+        .set(
+          {
+            chapterIndex: position.chapterIndex,
+            percentInChapter: position.percentInChapter,
+            userOffsetPx: position.userOffsetPx ?? 0,
+            lastMode: position.lastMode,
+            lastUpdated: stampedLastUpdated,
+          },
+          { merge: true },
+        );
+    });
+
+  };
+  if (force) {
+    lastThrottledCloudPush[`audioPos:${position.bookId}`] = Date.now();
+    pushFn();
+  } else {
+    throttledCloudPush(`audioPos:${position.bookId}`, pushFn);
+  }
+}
+
+/**
+ Pushes the "which book was most recently listened to" pointer to the user
+ root doc as a singleton field. Tells a fresh device which book to prompt
+ for, so the user doesn't have to hunt through their library for it before
+ the pairing UI can act on it.
+*/
+async function pushLastAudioContextToCloud() {
+  if (!currentUser) return;
+  const stored = await new Promise((resolve) => {
+    const tx = db.transaction([STORE_LAST_AUDIO_CONTEXT], "readonly");
+    tx.objectStore(STORE_LAST_AUDIO_CONTEXT).get(LAST_AUDIO_CONTEXT_KEY).onsuccess = (e) =>
+      resolve(e.target.result || null);
+  });
+  if (!stored) return;
+  await withPushRetry("lastAudioContext", async () => {
+    logCloudWrite("lastAudioContext");
+    await userDoc().set(
+      {
+        lastAudioContext: {
+          bookId: stored.bookId ?? null,
+          lastModified: stored.lastModified || Date.now(),
+        },
+      },
+      { merge: true },
+    );
+  });
+}
+
 /**
   Throttled push of the Notes-page settings (collapsed tag sections, last-used tags) to the user's root
   doc, since these can change on nearly every click while managing tags.
@@ -479,6 +592,14 @@ async function deleteBookFromCloud(bookId) {
     .doc(String(bookId))
     .delete()
     .catch(() => {});
+  await audiobooksCollection()
+    .doc(String(bookId))
+    .delete()
+    .catch(() => {});
+  await audioPositionsCollection()
+    .doc(String(bookId))
+    .delete()
+    .catch(() => {});
 }
 
 async function deleteGroupFromCloud(groupId) {
@@ -488,6 +609,7 @@ async function deleteGroupFromCloud(groupId) {
     .delete()
     .catch(() => {});
 }
+
 
 // -----------------------------------------------------------------
 // PULL: cloud -> local (one-time catch-up run right after sign-in / reload)
@@ -503,12 +625,22 @@ async function pullInitialSyncFromCloud() {
   console.log("[FirebaseSync] running pullInitialSyncFromCloud()");
 
   try {
-    const [remoteBooksSnap, remoteGroupsSnap, remoteNotesSnap, remoteNoteTagsSnap, remoteUserSnap] = await Promise.all([
+    const [
+      remoteBooksSnap,
+      remoteGroupsSnap,
+      remoteNotesSnap,
+      remoteNoteTagsSnap,
+      remoteUserSnap,
+      remoteAudiobooksSnap,
+      remotePositionsSnap,
+    ] = await Promise.all([
       booksCollection().get(),
       groupsCollection().get(),
       notesCollection().get(),
       noteTagsCollection().get(),
       userDoc().get(),
+      audiobooksCollection().get(),
+      audioPositionsCollection().get(),
     ]);
 
     const remoteBookIds = new Set(
@@ -646,6 +778,75 @@ async function pullInitialSyncFromCloud() {
       }
     }
 
+    const localAudiobooks = await getAllFromLocalStore(STORE_AUDIOBOOKS);
+    const remoteAudiobookIds = new Set(remoteAudiobooksSnap.docs.map((d) => Number(d.id)));
+
+    await new Promise((resolve) => {
+      const tx = db.transaction([STORE_AUDIOBOOKS], "readwrite");
+      const store = tx.objectStore(STORE_AUDIOBOOKS);
+      remoteAudiobooksSnap.forEach((docSnap) => {
+        const bookId = Number(docSnap.id);
+        const remote = docSnap.data();
+        const localRecord = localAudiobooks.find((a) => a.bookId === bookId);
+        if (!localRecord || (remote.lastModified || 0) > (localRecord.lastModified || 0)) {
+          store.put({
+            bookId,
+            title: remote.title ?? null,
+            author: remote.author ?? null,
+            duration: remote.duration ?? 0,
+            chapters: remote.chapters ?? [],
+            chapterOffset: remote.chapterOffset ?? null,
+            syncMode: remote.syncMode ?? null,
+            wholeBookOffset: remote.wholeBookOffset ?? 0,
+            playbackSpeed: remote.playbackSpeed ?? 1,
+            lastModified: remote.lastModified || 0,
+          });
+        }
+      });
+      tx.oncomplete = resolve;
+    });
+
+    for (const localAudio of localAudiobooks) {
+      const remoteDoc = remoteAudiobooksSnap.docs.find((d) => Number(d.id) === localAudio.bookId);
+      if (!remoteDoc) {
+        await pushAudiobookToCloud(localAudio);
+      } else if ((localAudio.lastModified || 0) > (remoteDoc.data().lastModified || 0)) {
+        await pushAudiobookToCloud(localAudio);
+      }
+    }
+
+    const localPositions = await getAllFromLocalStore(STORE_AUDIO_SYNC_POSITION);
+
+    await new Promise((resolve) => {
+      const tx = db.transaction([STORE_AUDIO_SYNC_POSITION], "readwrite");
+      const store = tx.objectStore(STORE_AUDIO_SYNC_POSITION);
+      remotePositionsSnap.forEach((docSnap) => {
+        const bookId = Number(docSnap.id);
+        const remote = docSnap.data();
+        const localRecord = localPositions.find((p) => p.bookId === bookId);
+        if (!localRecord || (remote.lastUpdated || 0) > (localRecord.lastUpdated || 0)) {
+          store.put({
+            bookId,
+            chapterIndex: remote.chapterIndex ?? 0,
+            percentInChapter: remote.percentInChapter ?? 0,
+            userOffsetPx: remote.userOffsetPx ?? 0,
+            lastMode: remote.lastMode ?? "reading",
+            lastUpdated: remote.lastUpdated || 0,
+          });
+        }
+      });
+      tx.oncomplete = resolve;
+    });
+
+    for (const localPos of localPositions) {
+      const remoteDoc = remotePositionsSnap.docs.find((d) => Number(d.id) === localPos.bookId);
+      if (!remoteDoc) {
+        await pushAudioSyncPositionToCloud(localPos, true);
+      } else if ((localPos.lastUpdated || 0) > (remoteDoc.data().lastUpdated || 0)) {
+        await pushAudioSyncPositionToCloud(localPos, true);
+      }
+    }
+
     /*
      Settings: last-write-wins on the whole bundle (it's just two small
      UI-preference values, not worth field-by-field merging). Missing
@@ -678,6 +879,29 @@ async function pullInitialSyncFromCloud() {
         }
       } else {
         pushNoteSettingsToCloud();
+      }
+    }
+    const remoteLastAudioContext = remoteUserData && remoteUserData.lastAudioContext;
+    if (remoteLastAudioContext) {
+      const localCtx = await new Promise((resolve) => {
+        const tx = db.transaction([STORE_LAST_AUDIO_CONTEXT], "readonly");
+        tx.objectStore(STORE_LAST_AUDIO_CONTEXT).get(LAST_AUDIO_CONTEXT_KEY).onsuccess = (e) =>
+          resolve(e.target.result || null);
+      });
+      const localStamp = localCtx ? localCtx.lastModified || 0 : 0;
+      const remoteStamp = remoteLastAudioContext.lastModified || 0;
+      if (remoteStamp > localStamp) {
+        await new Promise((resolve) => {
+          const tx = db.transaction([STORE_LAST_AUDIO_CONTEXT], "readwrite");
+          tx.objectStore(STORE_LAST_AUDIO_CONTEXT).put({
+            key: LAST_AUDIO_CONTEXT_KEY,
+            bookId: remoteLastAudioContext.bookId,
+            lastModified: remoteStamp,
+          });
+          tx.oncomplete = resolve;
+        });
+      } else if (localStamp > remoteStamp) {
+        pushLastAudioContextToCloud();
       }
     }
   } catch (err) {

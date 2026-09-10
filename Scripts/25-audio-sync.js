@@ -37,12 +37,12 @@ async function recordListeningPosition(bookId, options = {}) {
     if (!bookId) return;
     if (!activeAudioElement) return;
 
+    const forceCloudPush = options.forceCloudPush === true;
     let chapterIndex = options.chapterIndex;
     let percentInChapter = options.percentInChapter;
 
     // If explicit values were passed, use them directly
     if (chapterIndex !== undefined && percentInChapter !== undefined) {
-        // Clamp and write
         const audiobook = await getAudiobookForBook(bookId);
         const maxChapter = audiobook?.chapters?.length ? audiobook.chapters.length - 1 : 0;
         chapterIndex = Math.max(0, Math.min(chapterIndex, maxChapter));
@@ -52,6 +52,7 @@ async function recordListeningPosition(bookId, options = {}) {
             percentInChapter,
             userOffsetPx: syncUserOffsetPx || 0,
             lastMode: 'listening',
+            forceCloudPush,
         });
         return;
     }
@@ -59,7 +60,6 @@ async function recordListeningPosition(bookId, options = {}) {
     // Otherwise compute from current time
     const audiobook = await getAudiobookForBook(bookId);
     if (!audiobook || !audiobook.chapters || audiobook.chapters.length === 0) {
-        // No chapters – we can't map time to a chapter.
         console.warn("[recordListeningPosition] No chapters found for book", bookId);
         return;
     }
@@ -79,6 +79,7 @@ async function recordListeningPosition(bookId, options = {}) {
         percentInChapter,
         userOffsetPx: syncUserOffsetPx || 0,
         lastMode: 'listening',
+        forceCloudPush,
     });
 }
 

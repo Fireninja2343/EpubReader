@@ -403,6 +403,144 @@ const SYNC_TYPE_REGISTRY = [
       }
     },
   },
+    {
+    key: "audiobooks",
+    label: "Audiobooks",
+    icon: "🎧",
+    fetchLocal: () => getAllFromLocalStore(STORE_AUDIOBOOKS),
+    fetchRemote: () => fetchRemoteCollection(audiobooksCollection),
+    describe: (rec) => rec.title || `Audiobook for book #${rec.bookId}`,
+    fieldsToCompare: (rec) => ({
+      title: rec.title ?? null,
+      author: rec.author ?? null,
+      duration: rec.duration ?? 0,
+      chapters: rec.chapters ?? [],
+      chapterOffset: rec.chapterOffset ?? null,
+      syncMode: rec.syncMode ?? null,
+      wholeBookOffset: rec.wholeBookOffset ?? 0,
+      playbackSpeed: rec.playbackSpeed ?? 1,
+    }),
+    fieldMeta: {
+      title: { group: "Metadata", label: "Title" },
+      author: { group: "Metadata", label: "Author" },
+      duration: { group: "Metadata", label: "Duration", format: formatDiffDuration },
+      chapters: { group: "Metadata", label: "Chapter List", format: formatDiffLogArray("chapter") },
+      chapterOffset: { group: "Sync", label: "Chapter Offset" },
+      syncMode: { group: "Sync", label: "Sync Mode" },
+      wholeBookOffset: {
+        group: "Sync",
+        label: "Whole-Book Offset",
+        format: (v) => `${((v ?? 0) * 100).toFixed(2)}%`,
+      },
+      playbackSpeed: {
+        group: "Playback",
+        label: "Playback Speed",
+        format: (v) => `${(v ?? 1).toFixed(2)}x`,
+      },
+    },
+    applyAddition: async (record, direction) => {
+      if (direction === "pull") {
+        await putLocalRecord(STORE_AUDIOBOOKS, {
+          bookId: record.bookId,
+          title: record.title ?? null,
+          author: record.author ?? null,
+          duration: record.duration ?? 0,
+          chapters: record.chapters ?? [],
+          chapterOffset: record.chapterOffset ?? null,
+          syncMode: record.syncMode ?? null,
+          wholeBookOffset: record.wholeBookOffset ?? 0,
+          playbackSpeed: record.playbackSpeed ?? 1,
+          lastModified: record.lastModified || 0,
+        });
+      } else {
+        await pushAudiobookToCloud(record);
+      }
+    },
+    applyUpdate: async (localRec, remoteRec, direction) => {
+      if (direction === "pull") {
+        await putLocalRecord(STORE_AUDIOBOOKS, {
+          ...localRec,
+          title: remoteRec.title ?? null,
+          author: remoteRec.author ?? null,
+          duration: remoteRec.duration ?? 0,
+          chapters: remoteRec.chapters ?? [],
+          chapterOffset: remoteRec.chapterOffset ?? null,
+          syncMode: remoteRec.syncMode ?? null,
+          wholeBookOffset: remoteRec.wholeBookOffset ?? 0,
+          playbackSpeed: remoteRec.playbackSpeed ?? 1,
+          lastModified: remoteRec.lastModified || 0,
+        });
+      } else {
+        await pushAudiobookToCloud(localRec);
+      }
+    },
+    applyRemoval: async (id, direction) => {
+      if (direction === "pull") {
+        await deleteLocalRecord(STORE_AUDIOBOOKS, id);
+      } else {
+        await deleteAudiobookFromCloud(id);
+      }
+    },
+  },
+  {
+    key: "audioPositions",
+    label: "Listening Positions",
+    icon: "🎯",
+    fetchLocal: () => getAllFromLocalStore(STORE_AUDIO_SYNC_POSITION),
+    fetchRemote: () => fetchRemoteCollection(audioPositionsCollection),
+    describe: (rec) => `Position for book #${rec.bookId}`,
+    fieldsToCompare: (rec) => ({
+      chapterIndex: rec.chapterIndex ?? 0,
+      percentInChapter: rec.percentInChapter ?? 0,
+      userOffsetPx: rec.userOffsetPx ?? 0,
+      lastMode: rec.lastMode ?? "reading",
+    }),
+    fieldMeta: {
+      chapterIndex: { group: "Position", label: "Chapter Index" },
+      percentInChapter: {
+        group: "Position",
+        label: "Percent in Chapter",
+        format: (v) => `${((v ?? 0) * 100).toFixed(1)}%`,
+      },
+      userOffsetPx: { group: "Position", label: "User Scroll Offset" },
+      lastMode: { group: "Position", label: "Last Mode" },
+    },
+    applyAddition: async (record, direction) => {
+      if (direction === "pull") {
+        await putLocalRecord(STORE_AUDIO_SYNC_POSITION, {
+          bookId: record.bookId,
+          chapterIndex: record.chapterIndex ?? 0,
+          percentInChapter: record.percentInChapter ?? 0,
+          userOffsetPx: record.userOffsetPx ?? 0,
+          lastMode: record.lastMode ?? "reading",
+          lastUpdated: record.lastUpdated || 0,
+        });
+      } else {
+        await pushAudioSyncPositionToCloud(record, true);
+      }
+    },
+    applyUpdate: async (localRec, remoteRec, direction) => {
+      if (direction === "pull") {
+        await putLocalRecord(STORE_AUDIO_SYNC_POSITION, {
+          bookId: localRec.bookId,
+          chapterIndex: remoteRec.chapterIndex ?? 0,
+          percentInChapter: remoteRec.percentInChapter ?? 0,
+          userOffsetPx: remoteRec.userOffsetPx ?? 0,
+          lastMode: remoteRec.lastMode ?? "reading",
+          lastUpdated: remoteRec.lastUpdated || 0,
+        });
+      } else {
+        await pushAudioSyncPositionToCloud(localRec, true);
+      }
+    },
+    applyRemoval: async (id, direction) => {
+      if (direction === "pull") {
+        await deleteLocalRecord(STORE_AUDIO_SYNC_POSITION, id);
+      } else {
+        await deleteAudioSyncPositionFromCloud(id);
+      }
+    },
+  },
   {
     key: "settings",
     label: "Settings / Preferences",
@@ -461,9 +599,83 @@ const SYNC_TYPE_REGISTRY = [
         await pushNoteSettingsToCloudForced();
       }
     },
+    
     // Never meaningfully deleted; only reached when one side hasn't synced yet, so no-op (the paired
     // Addition brings sides in line).
     applyRemoval: async () => {},
+  },
+    {
+    key: "lastAudioContext",
+    label: "Last Audio Context",
+    icon: "🔗",
+    // Singleton field on the user root doc, same shape as settings above.
+    // Only meaningful for devices that have a file handle for that book —
+    // the handle itself is device-specific (STORE_AUDIO_LOCAL) and never
+    // syncs, but knowing which book the user last listened to is still
+    // useful cross-device.
+    fetchLocal: async () => {
+      const bookId = await getLastAudioContext();
+      if (bookId == null) return [];
+      return [{ id: "lastAudioContext", bookId }];
+    },
+    fetchRemote: async () => {
+      const snap = await userDoc().get();
+      const data = snap.exists ? snap.data() : null;
+      const ctx = data && data.lastAudioContext;
+      if (!ctx || ctx.bookId == null) return [];
+      return [{ id: "lastAudioContext", bookId: ctx.bookId }];
+    },
+    describe: () => "Book marked for one-click auto-resume",
+    fieldsToCompare: (rec) => ({
+      bookId: rec.bookId ?? null,
+    }),
+    fieldMeta: {
+      bookId: { group: "Context", label: "Book ID" },
+    },
+    applyAddition: async (record, direction) => {
+      if (direction === "pull") {
+        await new Promise((resolve, reject) => {
+          const tx = db.transaction([STORE_LAST_AUDIO_CONTEXT], "readwrite");
+          tx.objectStore(STORE_LAST_AUDIO_CONTEXT).put({
+            key: LAST_AUDIO_CONTEXT_KEY,
+            bookId: record.bookId,
+            lastModified: Date.now(),
+          });
+          tx.oncomplete = resolve;
+          tx.onerror = () => reject(tx.error);
+        });
+      } else {
+        pushLastAudioContextToCloud();
+      }
+    },
+    applyUpdate: async (localRec, remoteRec, direction) => {
+      if (direction === "pull") {
+        await new Promise((resolve, reject) => {
+          const tx = db.transaction([STORE_LAST_AUDIO_CONTEXT], "readwrite");
+          tx.objectStore(STORE_LAST_AUDIO_CONTEXT).put({
+            key: LAST_AUDIO_CONTEXT_KEY,
+            bookId: remoteRec.bookId,
+            lastModified: Date.now(),
+          });
+          tx.oncomplete = resolve;
+          tx.onerror = () => reject(tx.error);
+        });
+      } else {
+        pushLastAudioContextToCloud();
+      }
+    },
+    applyRemoval: async (id, direction) => {
+      if (direction === "pull") {
+        await new Promise((resolve) => {
+          const tx = db.transaction([STORE_LAST_AUDIO_CONTEXT], "readwrite");
+          tx.objectStore(STORE_LAST_AUDIO_CONTEXT).delete(LAST_AUDIO_CONTEXT_KEY);
+          tx.oncomplete = resolve;
+        });
+      } else {
+        // Clearing the cloud field: null with merge keeps the user doc intact.
+        await userDoc().set({ lastAudioContext: null }, { merge: true });
+      }
+    },
   },
 ];
 
@@ -493,8 +705,17 @@ function deleteLocalRecord(storeName, id) {
  */
 function deleteBookLocallyOnly(id) {
   return new Promise((resolve, reject) => {
-    const tx = db.transaction([STORE_BOOKS], "readwrite");
+    // Same cascade as the context-menu delete — otherwise pulling a "delete
+    // this book" operation leaves orphaned audiobook/position records that
+    // the next sync pushes right back to the cloud.
+    const tx = db.transaction(
+      [STORE_BOOKS, STORE_AUDIOBOOKS, STORE_AUDIO_SYNC_POSITION, STORE_AUDIO_LOCAL],
+      "readwrite",
+    );
     tx.objectStore(STORE_BOOKS).delete(id);
+    tx.objectStore(STORE_AUDIOBOOKS).delete(id);
+    tx.objectStore(STORE_AUDIO_SYNC_POSITION).delete(id);
+    tx.objectStore(STORE_AUDIO_LOCAL).delete(id);
     tx.oncomplete = resolve;
     tx.onerror = () => reject(tx.error);
   });

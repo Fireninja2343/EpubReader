@@ -48,11 +48,20 @@ function triggerContextAction(actionKey) {
     switch (actionKey) {
         case "delete":
             if (confirm(`Remove "${targetBookObj.title}" from library completely?`)) {
-                const transaction = db.transaction([Config.Db.STORE_BOOKS], "readwrite");
-                transaction.objectStore(Config.Db.STORE_BOOKS).delete(targetBookObj.id);
+                const bookId = targetBookObj.id;
+                // Cascade: audiobook pairing, sync position, and the local file handle are all meaningless without the book they belong to.
+                // Deleting only the book record would leave orphans that the next pull sync pushes BACK to the cloud.
+                const transaction = db.transaction(
+                    [STORE_BOOKS, STORE_AUDIOBOOKS, STORE_AUDIO_SYNC_POSITION, STORE_AUDIO_LOCAL],
+                    "readwrite",
+                );
+                transaction.objectStore(STORE_BOOKS).delete(bookId);
+                transaction.objectStore(STORE_AUDIOBOOKS).delete(bookId);
+                transaction.objectStore(STORE_AUDIO_SYNC_POSITION).delete(bookId);
+                transaction.objectStore(STORE_AUDIO_LOCAL).delete(bookId);
                 transaction.oncomplete = () => {
                     fetchLocalLibrary();
-                    if (typeof deleteBookFromCloud === "function") deleteBookFromCloud(targetBookObj.id);
+                    if (typeof deleteBookFromCloud === "function") deleteBookFromCloud(bookId);
                 };
             }
             break;

@@ -381,6 +381,13 @@ function migrateMissingLastModified() {
     "lastModified",
     typeof pushGroupToCloud === "function" ? pushGroupToCloud : null,
   );
+  backfillMissingField(
+    STORE_AUDIOBOOKS,
+    (audiobook) => !audiobook.lastModified,
+    () => Date.now(),
+    "lastModified",
+    typeof pushAudiobookToCloud === "function" ? pushAudiobookToCloud : null,
+  );
 }
 
 /**
@@ -711,9 +718,7 @@ function pairAudiobook(bookId, metadata) {
   return new Promise((resolve, reject) => {
     const transaction = db.transaction([STORE_AUDIOBOOKS], "readwrite");
     const store = transaction.objectStore(STORE_AUDIOBOOKS);
-    // get-then-put (rather than a blind put) so re-pairing preserves an
-    // already-stored chapterOffset instead of wiping calibration every time
-    // metadata is refreshed.
+    let updatedRecord = null;
     store.get(bookId).onsuccess = (e) => {
       const existing = e.target.result || {};
       const record = {
@@ -722,19 +727,21 @@ function pairAudiobook(bookId, metadata) {
         author: metadata.author ?? null,
         duration: metadata.duration ?? 0,
         chapters: metadata.chapters ?? [],
-        // Integer: audioChapterIndex = epubSpineIndex - chapterOffset. Set by
-        // the calibration modal (24-audio-pairing.js); null until calibrated,
-        // meaning position mapping can't run yet for this book.
         chapterOffset: existing.chapterOffset ?? null,
-        // Sync mode: null (disabled), "chapter", or "whole". Set by the segmented control.
         syncMode: existing.syncMode ?? null,
-        // Whole-book offset as fraction (e.g. 0.05 = +5%). Used only when syncMode === "whole".
         wholeBookOffset: existing.wholeBookOffset ?? 0,
+        playbackSpeed: existing.playbackSpeed ?? 1,
         lastModified: Date.now(),
       };
       store.put(record);
+      updatedRecord = record;
     };
-    transaction.oncomplete = () => resolve();
+    transaction.oncomplete = () => {
+      if (updatedRecord && typeof pushAudiobookToCloud === "function") {
+        pushAudiobookToCloud(updatedRecord);
+      }
+      resolve();
+    };
     transaction.onerror = () => reject(transaction.error);
   });
 }
@@ -752,15 +759,22 @@ function setAudiobookChapterOffset(bookId, offset) {
   return new Promise((resolve, reject) => {
     const transaction = db.transaction([STORE_AUDIOBOOKS], "readwrite");
     const store = transaction.objectStore(STORE_AUDIOBOOKS);
+    let updatedRecord = null;
     store.get(bookId).onsuccess = (e) => {
       const record = e.target.result;
       if (record) {
         record.chapterOffset = offset;
         record.lastModified = Date.now();
         store.put(record);
+        updatedRecord = record;
       }
     };
-    transaction.oncomplete = () => resolve();
+    transaction.oncomplete = () => {
+      if (updatedRecord && typeof pushAudiobookToCloud === "function") {
+        pushAudiobookToCloud(updatedRecord);
+      }
+      resolve();
+    };
     transaction.onerror = () => reject(transaction.error);
   });
 }
@@ -776,6 +790,7 @@ function setAudiobookSyncMode(bookId, mode, offset = 0) {
   return new Promise((resolve, reject) => {
     const transaction = db.transaction([STORE_AUDIOBOOKS], "readwrite");
     const store = transaction.objectStore(STORE_AUDIOBOOKS);
+    let updatedRecord = null;
     store.get(bookId).onsuccess = (e) => {
       const record = e.target.result;
       if (record) {
@@ -783,9 +798,15 @@ function setAudiobookSyncMode(bookId, mode, offset = 0) {
         record.wholeBookOffset = offset;
         record.lastModified = Date.now();
         store.put(record);
+        updatedRecord = record;
       }
     };
-    transaction.oncomplete = () => resolve();
+    transaction.oncomplete = () => {
+      if (updatedRecord && typeof pushAudiobookToCloud === "function") {
+        pushAudiobookToCloud(updatedRecord);
+      }
+      resolve();
+    };
     transaction.onerror = () => reject(transaction.error);
   });
 }
@@ -800,15 +821,22 @@ function setAudiobookPlaybackSpeed(bookId, speed) {
   return new Promise((resolve, reject) => {
     const transaction = db.transaction([STORE_AUDIOBOOKS], "readwrite");
     const store = transaction.objectStore(STORE_AUDIOBOOKS);
+    let updatedRecord = null;
     store.get(bookId).onsuccess = (e) => {
       const record = e.target.result;
       if (record) {
         record.playbackSpeed = speed;
         record.lastModified = Date.now();
         store.put(record);
+        updatedRecord = record;
       }
     };
-    transaction.oncomplete = () => resolve();
+    transaction.oncomplete = () => {
+      if (updatedRecord && typeof pushAudiobookToCloud === "function") {
+        pushAudiobookToCloud(updatedRecord);
+      }
+      resolve();
+    };
     transaction.onerror = () => reject(transaction.error);
   });
 }
@@ -899,8 +927,18 @@ function setLastAudioContext(bookId) {
   return new Promise((resolve, reject) => {
     const transaction = db.transaction([STORE_LAST_AUDIO_CONTEXT], "readwrite");
     const store = transaction.objectStore(STORE_LAST_AUDIO_CONTEXT);
-    store.put({ key: LAST_AUDIO_CONTEXT_KEY, bookId });
-    transaction.oncomplete = () => resolve();
+    const record = {
+      key: LAST_AUDIO_CONTEXT_KEY,
+      bookId,
+      lastModified: Date.now(),
+    };
+    store.put(record);
+    transaction.oncomplete = () => {
+      if (typeof pushLastAudioContextToCloud === "function") {
+        pushLastAudioContextToCloud();
+      }
+      resolve();
+    };
     transaction.onerror = () => reject(transaction.error);
   });
 }
@@ -957,19 +995,27 @@ function updateAudioSyncPosition(bookId, position) {
   return new Promise((resolve, reject) => {
     const transaction = db.transaction([STORE_AUDIO_SYNC_POSITION], "readwrite");
     const store = transaction.objectStore(STORE_AUDIO_SYNC_POSITION);
-    store.put({
+    const record = {
       bookId,
       chapterIndex: position.chapterIndex,
       percentInChapter: position.percentInChapter,
       userOffsetPx: position.userOffsetPx ?? 0,
       lastMode: position.lastMode,
       lastUpdated: Date.now(),
-    });
-    transaction.oncomplete = () => resolve();
+    };
+    store.put(record);
+    transaction.oncomplete = () => {
+      if (typeof pushAudioSyncPositionToCloud === "function") {
+        // forceCloudPush is opt-in per call — discrete events (pause) want the
+        // exact stop position to land now; continuous timeupdate-driven writes
+        // ride the throttle.
+        pushAudioSyncPositionToCloud(record, position.forceCloudPush === true);
+      }
+      resolve();
+    };
     transaction.onerror = () => reject(transaction.error);
   });
 }
-
 
 let lastForcedCloudProgressPush = {};
 const FORCE_PUSH_MIN_GAP_MS = Config.Sync.FORCE_PUSH_MIN_GAP_MS;

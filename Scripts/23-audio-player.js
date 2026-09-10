@@ -77,13 +77,13 @@ function playAudio() {
 
 /**
  Pauses the currently loaded audio. No-op if nothing is loaded.
+ Pushes the current listening position to the cloud if an active book is set.
 */
 function pauseAudio() {
     if (!activeAudioElement) return;
     activeAudioElement.pause();
-    // Record position on explicit pause
     if (activeBookObject && activeBookObject.id) {
-        recordListeningPosition(activeBookObject.id);
+        recordListeningPosition(activeBookObject.id, { forceCloudPush: true });
     }
 }
 
